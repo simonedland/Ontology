@@ -218,3 +218,20 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# TGO
+out/
+*.session
+*.session-journal
+.tgo/
+wheelhouse/
+models/
+
+# Ontop JDBC driver (fetched separately; never commit)
+workspace/jdbc/*.jar
+
+# Docker workspace (bind-mounted into the containers); keep the folder skeleton only
+workspace/*/*
+!workspace/*/.gitkeep
+!workspace/config/tgo.example.toml
+!workspace/README.md

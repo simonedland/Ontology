@@ -1,0 +1,70 @@
+[build-system]
+requires = ["uv_build>=0.13.1,<0.14"]
+build-backend = "uv_build"
+
+[project]
+name = "tgo"
+version = "0.1.0"
+description = "Telegram Graph Ontology: offline ingestion, analysis and visualization of Telegram data"
+readme = "README.md"
+requires-python = ">=3.12"
+# networkx layouts are not pure Python: spring_layout needs numpy (and scipy at >=500 nodes),
+# kamada_kawai_layout always needs scipy. Both ship cp313 win_amd64 wheels.
+dependencies = [
+    "networkx>=3.3",
+    "numpy>=2",
+    "scipy>=1.13",
+    "pillow>=10",
+]
+
+[project.optional-dependencies]
+# Live MTProto collection is the only online step; v2 drops to_dict()/takeout().
+collect = ["telethon>=1.45,<2"]
+image = ["pdqhash>=0.2.8"]
+docs = ["pypdf>=5"]
+asr = ["faster-whisper>=1.2.1"]
+# rapidocr_onnxruntime does not install on Python 3.13; use rapidocr v3 with local model paths.
+ocr = ["rapidocr>=3.10", "onnxruntime>=1.20"]
+tesseract = ["pytesseract>=0.3.13"]
+# The xx_ent_wiki_sm model is a separate wheel (github.com/explosion/spacy-models releases).
+ner = ["spacy>=3.8,<4"]
+ids = ["phonenumbers>=8.13"]
+# Columnar engine for millions of entries (tgo.scale): DuckDB store, Arrow, NetworKit (parallel Louvain),
+# Faiss binary indexes. All MIT/Apache. Pin DuckDB < 2 until its 2.0 storage format settles.
+scale = ["duckdb>=1.5,<2", "pyarrow>=15", "networkit>=11", "faiss-cpu>=1.14"]
+all = ["tgo[collect,image,docs,asr,ocr,tesseract,ner,ids,scale]"]
+
+[project.scripts]
+tgo = "tgo.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8.4", "ruff>=0.17"]
+
+[tool.uv.build-backend]
+module-name = "tgo"
+module-root = ""
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers"]
+markers = [
+    "network: needs network access (never run in offline CI)",
+    "slow: long-running (ASR/OCR on real media)",
+    "extras: needs optional extras installed",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = ["tgo/viz/vendor"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"requests".msg = "network client: tgo must run offline"
+"httpx".msg = "network client: tgo must run offline"
+"urllib.request".msg = "network client: tgo must run offline"
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/**" = ["TID251"]

@@ -1,0 +1,11 @@
+# Copy to tgo.toml in this folder; containers pick it up as /config/tgo.toml.
+# Any key from docs/configuration.md works here. Environment overrides (TGO_<SECTION>_<FIELD>) win over this file.
+
+[coordination]
+time_window = 60
+
+[scale]
+engine = "auto"          # memory | duckdb | auto
+
+[viewer]
+dashboard = true

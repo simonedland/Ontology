@@ -1,0 +1,123 @@
+# Tests, plus the two checks the repo tests can't make on a dev machine:
+#  * wheel-only: install just the built wheel in a fresh venv (catches missing core deps)
+#  * no-network: run the demo pipeline in a container with networking disabled at the OS level
+#    (catches native/C-level network use that Python socket patches cannot see)
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -e . pytest
+      - run: python -m pytest
+      - run: python -m tgo offline-check
+
+  wheel-only:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip wheel . --no-deps -w dist
+      - name: Fresh venv with only the wheel and its core dependencies
+        shell: bash
+        run: |
+          python -m venv /tmp/clean
+          if [ -x /tmp/clean/Scripts/python ]; then PY=/tmp/clean/Scripts/python; else PY=/tmp/clean/bin/python; fi
+          "$PY" -m pip install dist/*.whl
+          cd /tmp
+          "$PY" -I -m tgo demo --out /tmp/tgo-demo
+          "$PY" -I -m tgo offline-check
+          test -s /tmp/tgo-demo/report.html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.os }}
+          path: dist/*.whl
+
+  no-network:
+    needs: wheel-only
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel-ubuntu-latest
+          path: dist
+      - name: Download wheels for the offline install (online step)
+        run: |
+          WHL=$(ls dist/*.whl)
+          python -m pip download "$WHL[scale]" -d wheelhouse --only-binary=:all: --python-version 3.13 \
+            --platform manylinux2014_x86_64 --platform manylinux_2_17_x86_64 --platform manylinux_2_28_x86_64
+          cp dist/*.whl wheelhouse/
+      - name: Install and run the demo with networking disabled
+        run: |
+          docker run --rm --network none -v "$PWD/wheelhouse:/wh:ro" python:3.13-slim sh -euc '
+            pip install --no-index --find-links /wh tgo
+            cd /tmp && python -I -m tgo demo --out /tmp/out && python -I -m tgo offline-check
+            test -s /tmp/out/report.html
+            python -I -m tgo demo --dashboard --out /tmp/d > /dev/null && test -s /tmp/d/dashboard.html'
+      # DuckDB is native code: only an OS-level network block proves it never fetches extensions.
+      - name: DuckDB engine with networking disabled
+        run: |
+          docker run --rm --network none -v "$PWD/wheelhouse:/wh:ro" python:3.13-slim sh -euc '
+            pip install --no-index --find-links /wh "tgo[scale]"
+            cd /tmp && python -I -m tgo demo --out /tmp/demo > /dev/null
+            python -I -m tgo run --input /tmp/demo/input --out /tmp/scale --engine duckdb
+            test -s /tmp/scale/report.html
+            python -I -c "
+          import duckdb
+          from tgo.scale.store import Store
+          con = Store(\"/tmp/scale/probe.duckdb\").con
+          for q in (\"INSTALL httpfs\", \"INSTALL httpfs FROM core\"):
+              try:
+                  con.execute(q)
+              except duckdb.PermissionException:
+                  continue
+              raise SystemExit(f\"DuckDB allowed: {q}\")
+          "
+            test ! -e ~/.duckdb'
+
+  # The compose stack: image builds (with its offline-check), pipeline services under network_mode none
+  # and a read-only root, DuckDB engine included, then the test suite inside the dev image.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run containers as the runner user (bind-mounted outputs stay writable)
+        run: echo "TGO_UID=$(id -u)" >> "$GITHUB_ENV" && echo "TGO_GID=$(id -g)" >> "$GITHUB_ENV"
+      - run: docker compose config -q && docker compose --profile '*' config -q
+      - run: docker compose build tgo test
+      - name: Demo and DuckDB engine with no network
+        run: |
+          mkdir -p workspace/out
+          docker compose run --rm demo
+          test -s workspace/out/demo/report.html && test -s workspace/out/demo/dashboard.html
+          docker compose run --rm tgo sh -euc '
+            python -P -m tgo run --input /out/demo/input --out /out/scale --engine duckdb
+            test ! -e ~/.duckdb'
+          test -s workspace/out/scale/report.html && test -s workspace/out/scale/neo4j/nodes.csv
+      - run: docker compose run --rm test

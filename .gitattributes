@@ -1,8 +1,8 @@
 # Normalise text to LF in the repo and on checkout, on every OS.
 * text=auto eol=lf
 
-# Vendored assets are pinned by sha256 (tgo/viz/vendor/MANIFEST.json): never convert them.
-tgo/viz/vendor/** -text -diff
+# Vendored assets are pinned by sha256 (legacy/tgo/tgo/viz/vendor/MANIFEST.json): never convert them.
+legacy/tgo/tgo/viz/vendor/** -text -diff
 *.whl binary
 *.png binary
 *.jpg binary

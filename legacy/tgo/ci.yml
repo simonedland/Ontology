@@ -2,7 +2,9 @@
 #  * wheel-only: install just the built wheel in a fresh venv (catches missing core deps)
 #  * no-network: run the demo pipeline in a container with networking disabled at the OS level
 #    (catches native/C-level network use that Python socket patches cannot see)
-name: ci
+# ARCHIVED: the tgo toolkit now lives in legacy/tgo. To re-enable, copy this file to .github/workflows/;
+# every step runs from legacy/tgo (defaults.run below; artifact paths are relative to the repo root).
+name: ci-legacy-tgo
 
 on:
   push:
@@ -15,6 +17,10 @@ concurrency:
 
 permissions:
   contents: read
+
+defaults:
+  run:
+    working-directory: legacy/tgo
 
 jobs:
   test:
@@ -57,7 +63,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: wheel-${{ matrix.os }}
-          path: dist/*.whl
+          path: legacy/tgo/dist/*.whl
 
   no-network:
     needs: wheel-only
@@ -66,7 +72,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: wheel-ubuntu-latest
-          path: dist
+          path: legacy/tgo/dist
       - name: Download wheels for the offline install (online step)
         run: |
           WHL=$(ls dist/*.whl)

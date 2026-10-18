@@ -46,7 +46,7 @@ def neo4j_bulk(store, out: Path) -> dict:
                          array_to_string(evidence, ';') AS "evidence:string[]",
                          array_to_string(runs, ';') AS "runs:string[]", props::VARCHAR AS props FROM edges)
                   TO '{_p(out / 'relationships.csv')}' (HEADER true)""")
-    cmd = ("neo4j-admin database import full tgo --overwrite-destination --id-type=integer "
+    cmd = ("neo4j-admin database import full neo4j --overwrite-destination --id-type=integer "
            "--array-delimiter=\";\" --nodes=nodes.csv --relationships=relationships.csv")
     (out / "import.sh").write_text("#!/bin/sh\n# run from this directory with Neo4j stopped\n" + cmd + "\n",
                                    encoding="utf-8")

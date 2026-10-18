@@ -232,7 +232,8 @@ class Graph:
             self.node(akey, "ModelAgent", **agent)
             self._run_stack.append(run_key)
             try:
-                self.edge("ASSOCIATED_WITH", run_key, akey)
+                if f"{run_key}-[ASSOCIATED_WITH]->{akey}" not in self.edges:   # idempotent: re-entering a run
+                    self.edge("ASSOCIATED_WITH", run_key, akey)                  # (e.g. per batch) is not a new event
             finally:
                 self._run_stack.pop()
         self._run_stack.append(run_key)

@@ -96,12 +96,57 @@ def case_keys(store, max_nodes: int = 6000) -> list[str]:
     return [k for (k,) in c.execute(f"SELECT k FROM case_rank ORDER BY pri, d DESC, k LIMIT {int(max_nodes)}").fetchall()]
 
 
+
+def _timed_step(log, timings: dict):
+    def step(name, fn, *a, **kw):
+        t0 = time.perf_counter()
+        r = fn(*a, **kw)
+        timings[name] = round(time.perf_counter() - t0, 2)
+        shown = r if isinstance(r, dict) else (f"{len(r):,} items" if isinstance(r, (list, set)) else type(r).__name__)
+        text = str(shown)
+        log(f"  [{timings[name]:7.2f}s] {name}: {text if len(text) < 400 else text[:400] + ' ...'}")
+        return r
+    return step
+
+
+def analyse_store(store, cfg: Config, decisions=None, *, step=None, report: dict | None = None, log=print) -> dict:
+    """Merge staging, run every analysis (SQL / NetworKit / Faiss + duckdb plugin steps), merge again.
+
+    Re-runnable at any time (live mode): each analysis retracts its previous output first and
+    ``finalize`` is incremental, so the cost is the analyses, not a rebuild.  Returns ``report``.
+    """
+    from .. import plugins
+
+    report = {} if report is None else report
+    step = step or _timed_step(log, report.setdefault("timings", {}))
+    sc = cfg.scale
+    step("finalize #1", store.finalize)
+    report["aggregate"] = step("aggregate (SQL)", A.aggregate, store)
+    report["coordination"] = step("coordination (SQL)", A.coordination, store, **vars(cfg.coordination), log=log)
+    report["near_duplicates"] = step("near-duplicates", A.near_duplicates, store,
+                                     threshold=cfg.extract.phash_threshold,
+                                     exact_limit=sc.neardup_exact_limit, log=log)
+    step("finalize #2", store.finalize)
+    c = cfg.communities
+    report["communities"] = step("communities", A.communities, store, seeds=c.seeds, resolution=c.resolution,
+                                 min_size=c.min_size, min_stability=c.min_stability, edge_weights=c.edge_weights,
+                                 deterministic=c.deterministic, log=log)
+    i = cfg.identity
+    report["identity"] = step("identity (SQL)", A.identity, store, decisions, min_score=i.min_score,
+                              auto_accept=i.auto_accept, weights=i.weights, strong_identifiers=i.strong_identifiers,
+                              min_bio_len=i.min_bio_len, max_evidence_accounts=i.max_evidence_accounts, log=log)
+    for s in [s for a in plugins.BUILTIN_STEPS for s in plugins.steps_after(a, "duckdb")] + \
+            plugins.orphan_steps("duckdb"):
+        report[s.name] = step(s.name, s.fn, store, cfg)
+    report["stats"] = step("finalize #3", store.finalize)
+    return report
+
 # ------------------------------------------------------------------ main
 def run(input_dir: str | Path, out_dir: str | Path, config: Config | None = None, *,
         auto_accept: float | None = None, time_window: int | None = None, html: bool | None = None,
         log=print) -> dict:
     """DuckDB-engine pipeline; same signature and summary contract as :func:`tgo.pipeline.run`."""
-    cfg = copy.deepcopy(config) if config is not None else Config()
+    cfg = copy.deepcopy(config) if config is not None else Config.load()
     if auto_accept is not None:
         cfg.identity.auto_accept = auto_accept
     if time_window is not None:
@@ -125,14 +170,7 @@ def run(input_dir: str | Path, out_dir: str | Path, config: Config | None = None
     timings: dict[str, float] = {}
     report: dict = {"engine": "duckdb", "store": str(db)}
 
-    def step(name, fn, *a, **kw):
-        t0 = time.perf_counter()
-        r = fn(*a, **kw)
-        timings[name] = round(time.perf_counter() - t0, 2)
-        shown = r if isinstance(r, dict) else (f"{len(r):,} items" if isinstance(r, (list, set)) else type(r).__name__)
-        text = str(shown)
-        log(f"  [{timings[name]:7.2f}s] {name}: {text if len(text) < 400 else text[:400] + ' ...'}")
-        return r
+    step = _timed_step(log, timings)
 
     log(f"TGO scale pipeline (DuckDB): {input_dir} -> {out}")
     ext_opts = {"gazetteer": extractors.load_gazetteer(cfg.extract.gazetteer_path),
@@ -155,28 +193,9 @@ def run(input_dir: str | Path, out_dir: str | Path, config: Config | None = None
                                  for s in build_shares(g, cfg.coordination.min_text_len))
                 return store.flush(g)
             step(f"ingest {name} {Path(path).name}", _one)
-    step("finalize #1", store.finalize)
-    report["aggregate"] = step("aggregate (SQL)", A.aggregate, store)
-    report["coordination"] = step("coordination (SQL)", A.coordination, store, **vars(cfg.coordination),
-                                  max_object_accounts=sc.max_object_accounts, log=log)
-    report["near_duplicates"] = step("near-duplicates", A.near_duplicates, store,
-                                     threshold=cfg.extract.phash_threshold, k=sc.neardup_k,
-                                     exact_limit=sc.neardup_exact_limit, log=log)
-    step("finalize #2", store.finalize)
-    c = cfg.communities
-    report["communities"] = step("communities", A.communities, store, seeds=c.seeds, resolution=c.resolution,
-                                 min_size=c.min_size, min_stability=c.min_stability, edge_weights=c.edge_weights,
-                                 deterministic=c.deterministic, log=log)
     jpath = Path(input_dir) / "analyst" / "judgements.json"
     decisions = json.loads(jpath.read_text(encoding="utf-8")) if jpath.exists() else None
-    i = cfg.identity
-    report["identity"] = step("identity (SQL)", A.identity, store, decisions, min_score=i.min_score,
-                              auto_accept=i.auto_accept, weights=i.weights, strong_identifiers=i.strong_identifiers,
-                              min_bio_len=i.min_bio_len, max_evidence_accounts=sc.max_evidence_accounts, log=log)
-    for s in [s for a in plugins.BUILTIN_STEPS for s in plugins.steps_after(a, "duckdb")] + \
-            plugins.orphan_steps("duckdb"):
-        report[s.name] = step(s.name, s.fn, store, cfg)
-    report["stats"] = step("finalize #3", store.finalize)
+    analyse_store(store, cfg, decisions, step=step, report=report, log=log)
 
     findings = step("guardrails (SQL)", validate_store, store)
     report["exports"] = {}

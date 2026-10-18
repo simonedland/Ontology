@@ -28,8 +28,8 @@ which runs in-process and offline. Servers are optional, rebuildable *views* fed
 | Tier | Use when | Run it |
 |---|---|---|
 | **1. Embedded lakehouse** (default) | up to ~10⁸ edges on one workstation | `tgo run --engine duckdb`; query `tgo.duckdb` or `parquet/` (below) |
-| **2. Ontology / SPARQL view** | ontology-aligned queries without copying data; RDF tools that speak SPARQL | `tgo ontop --out out/corpus`, then `deploy/ontop/docker-compose.yml`. Ontop (Apache-2.0) translates SPARQL to SQL over `tgo.duckdb`, read-only. Put the DuckDB JDBC jar in `deploy/ontop/jdbc/`. |
-| **3. Interactive graph server** | several analysts exploring ~3×10⁸ to 10⁹+ edges | `deploy/neo4j/`: Neo4j 5.26 LTS community, digest-pinned, localhost-only, telemetry off. `TGO_OUT=out/corpus NEO4J_PASSWORD=… deploy/neo4j/load.sh` bulk-imports `out/<case>/neo4j/`. Plan ~120–200 GB store and 128–256 GB RAM per 10⁹ edges. |
+| **2. Ontology / SPARQL view** | ontology-aligned queries without copying data; RDF tools that speak SPARQL | `tgo ontop --out out/corpus`, then `docker compose --profile ontop up -d` ([docker.md](docker.md)). Ontop (Apache-2.0) translates SPARQL to SQL over `tgo.duckdb`, read-only. Put the DuckDB JDBC jar in `workspace/jdbc/`. |
+| **3. Interactive graph server** | several analysts exploring ~3×10⁸ to 10⁹+ edges | `docker compose --profile neo4j up -d` ([docker.md](docker.md)): Neo4j 5.26 LTS community, digest-pinned, localhost-only, telemetry off. Each `up` bulk-imports `out/$TGO_CASE/neo4j/` (set `NEO4J_PASSWORD`). Plan ~120–200 GB store and 128–256 GB RAM per 10⁹ edges. |
 | Microsoft Fabric | sanitised aggregates and Power BI only | load the Parquet export into OneLake. Fabric Graph is SaaS-only, so it can't run air-gapped. |
 
 - **Licensing:** Neo4j Community is GPLv3. Enforcing per-field visibility *inside* the database
@@ -92,7 +92,7 @@ streamed ingest + extract (batches × worker processes, Arrow inserts) ─► fi
 
 ## Tuning
 
-All of these are `scale.*` keys in your config file (reference in [configuration.md](configuration.md)):
+These are `scale.*` keys in your config file unless a section is shown (reference in [configuration.md](configuration.md)):
 
 | Key | Default | Raise it when… | Lower it when… |
 |---|---|---|---|
@@ -101,8 +101,8 @@ All of these are `scale.*` keys in your config file (reference in [configuration
 | `threads` | all cores | — | sharing the machine with other work |
 | `memory_limit` | DuckDB default (~80% of RAM) | — | other processes need RAM; DuckDB then spills to `temp_directory` |
 | `temp_directory` | next to the store | — | point it at a fast local SSD with free space |
-| `max_object_accounts` | 1,000 | a legitimately viral object should still count | popular URLs create noise (fan-out cap; dropped objects are logged) |
-| `max_evidence_accounts` | 50 | — | shared stock evidence floods identity candidates |
+| `coordination.max_object_accounts` | 1,000 | a legitimately viral object should still count | popular URLs create noise (fan-out cap; dropped objects are logged) |
+| `identity.max_evidence_accounts` | 50 | — | shared stock evidence floods identity candidates |
 | `restrict_files` | `true` | — | (keep on; see [Offline and security](#offline-and-security)) |
 | `exports` | `["parquet", "neo4j", "ntriples"]` | — | you don't need a format: N-Triples is the slowest (~8 min at 10M messages); drop it unless you load a triple store |
 

@@ -1,4 +1,4 @@
-"""Interoperability exports: FollowTheMoney (OpenAleph), STIX 2.1 (OpenCTI), Neo4j Cypher, GEXF."""
+"""Interoperability exports: FollowTheMoney (OpenAleph), STIX 2.1 (OpenCTI), Neo4j Cypher (GEXF lives in gexf.py)."""
 from __future__ import annotations
 
 import hashlib
@@ -178,15 +178,3 @@ def write_cypher(g: Graph, path: str | Path) -> None:
         L.append(f"MATCH (a:TGO {{key: {_cy(e.src)}}}), (b:TGO {{key: {_cy(e.dst)}}}) "
                  f"MERGE (a)-[r:{e.type} {{id: {_cy(e.id)}}}]->(b) SET r += {_map(props)};")
     Path(path).write_text("\n".join(L) + "\n", encoding="utf-8")
-
-
-def write_gexf(g: Graph, path: str | Path) -> None:
-    """Legacy NetworkX GEXF writer (the pipeline uses :mod:`tgo.export.gexf`)."""
-    import networkx as nx
-
-    G = g.to_networkx()
-    for _, d in G.nodes(data=True):
-        for k in list(d):
-            if d[k] is None:
-                del d[k]
-    nx.write_gexf(G, path)

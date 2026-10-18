@@ -17,7 +17,7 @@ import json
 import os
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import Callable, Iterator
+from typing import Callable, Iterable, Iterator
 
 from .. import extractors
 from ..analysis.coordination import build_shares
@@ -76,76 +76,119 @@ def _export_batch(result_json: str, ckey: str, names: dict, msgs: list[dict], ex
 
 
 # --------------------------------------------------------------------- main
+class _Runner:
+    """Holds the (optional) spawn process pool and running totals for one ingest session."""
+
+    def __init__(self, store, workers: int, log: Callable):
+        import multiprocessing as mp
+
+        cpus = os.process_cpu_count() if hasattr(os, "process_cpu_count") else os.cpu_count()  # respects affinity
+        self.workers = (cpus or 2) - 1 if workers < 0 else workers
+        self.store, self.log = store, log
+        self.totals = {"batches": 0, "nodes_staged": 0, "edges_staged": 0, "shares": 0}
+        # spawn (not fork): the parent already runs DuckDB threads; forking them is a deadlock risk on Linux
+        self.pool = (ProcessPoolExecutor(max_workers=self.workers, mp_context=mp.get_context("spawn"))
+                     if self.workers > 1 else None)
+
+    def take(self, result) -> None:
+        g, shares = result
+        n, e = self.store.flush(g) if isinstance(g, Graph) else self.store.insert_arrow(g)
+        t = self.totals
+        t["batches"] += 1
+        t["nodes_staged"] += n
+        t["edges_staged"] += e
+        t["shares"] += self.store.add_shares(shares)
+        if t["batches"] % 20 == 0:
+            self.log(f"    … {t['batches']} batches, {t['edges_staged']:,} edge rows staged")
+
+    def map(self, fn, jobs) -> None:
+        for res in (_imap(self.pool, fn, jobs, self.workers) if self.pool else (fn(*j) for j in jobs)):
+            self.take(res)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        if self.pool:
+            self.pool.shutdown()
+
+
+def _lines_into(r: _Runner, collection_dir: Path, lines: Iterable[str], *, entities: bool, batch_size: int,
+                ext_opts: dict, min_text_len: int, include_collector: bool = False) -> None:
+    if entities:   # sequential: entity order matters (e.g. channels before their participants)
+        g = Graph()
+        ing = MTProtoIngester(g, collection_dir)
+        with ing.activity():
+            if include_collector and ing.collector:
+                ing.user(ing.collector, is_collector=True)
+            for chunk in _chunks(lines, batch_size):
+                for line in chunk:
+                    ing.entity(json.loads(line))
+                r.take((g, _post(g, ext_opts, min_text_len)))
+                g = Graph()
+                ing.g = g
+            r.take((g, []))
+    else:
+        r.map(_mtproto_batch, ((str(collection_dir), chunk, ext_opts, min_text_len)
+                               for chunk in _chunks(lines, batch_size)))
+
+
+def _export_into(r: _Runner, result_json: Path, *, batch_size: int, ext_opts: dict, min_text_len: int) -> None:
+    g = Graph()
+    ing = DesktopExportIngester(g, result_json)
+    with ing.activity():
+        ing._personal()
+        ing._contacts()
+        heads = []
+        for chat, left in [(c, False) for c in (ing.data.get("chats") or {}).get("list", [])] + \
+                          [(c, True) for c in (ing.data.get("left_chats") or {}).get("list", [])]:
+            h = ing.chat_header(chat, left)
+            if h:
+                heads.append((h, chat.get("messages", [])))
+    r.take((g, []))
+    ing.data = None
+    r.map(_export_batch, ((str(result_json), ckey, names, chunk, ext_opts, min_text_len)
+                          for (ckey, names), msgs in heads for chunk in _chunks(msgs, batch_size)))
+
+
+def ingest_lines(store, collection_dir: str | Path, lines: Iterable[str], *, entities: bool = False,
+                 batch_size: int = 50_000, workers: int = 0, ext_opts: dict | None = None,
+                 min_text_len: int = 40, log: Callable = print) -> dict:
+    """Ingest MTProto JSONL lines (``entities.jsonl`` if ``entities`` else ``messages.jsonl``) of one collection.
+
+    For live tailing and initial loads alike; call ``store.finalize()`` afterwards, then re-run the
+    analyses (each retracts its previous output, so incremental updates stay exact).
+    """
+    with _Runner(store, workers, log) as r:
+        _lines_into(r, Path(collection_dir), lines, entities=entities, batch_size=batch_size,
+                    ext_opts=ext_opts or {}, min_text_len=min_text_len)
+        return r.totals
+
+
+def ingest_export(store, result_json: str | Path, *, batch_size: int = 50_000, workers: int = 0,
+                  ext_opts: dict | None = None, min_text_len: int = 40, log: Callable = print) -> dict:
+    """Ingest one Telegram Desktop ``result.json`` (parsed whole; export very large histories per chat)."""
+    with _Runner(store, workers, log) as r:
+        _export_into(r, Path(result_json), batch_size=batch_size, ext_opts=ext_opts or {}, min_text_len=min_text_len)
+        return r.totals
+
+
 def ingest_dir(store, input_dir: Path, *, batch_size: int = 50_000, workers: int = 0,
                ext_opts: dict | None = None, min_text_len: int = 40, log: Callable = print) -> dict:
-    """Stream every source under ``input_dir`` into ``store``.  Returns counts."""
+    """Stream every source under ``input_dir`` into ``store`` (one shared worker pool).  Returns counts."""
     from ..pipeline import discover
 
     ext_opts = ext_opts or {}
     src = discover(Path(input_dir))
-    workers = (os.cpu_count() or 2) - 1 if workers < 0 else workers
-    totals = {"batches": 0, "nodes_staged": 0, "edges_staged": 0, "shares": 0}
-
-    def take(result):
-        g, shares = result
-        n, e = store.flush(g) if isinstance(g, Graph) else store.insert_arrow(g)
-        totals["batches"] += 1
-        totals["nodes_staged"] += n
-        totals["edges_staged"] += e
-        totals["shares"] += store.add_shares(shares)
-        if totals["batches"] % 20 == 0:
-            log(f"    … {totals['batches']} batches, {totals['edges_staged']:,} edge rows staged")
-
-    pool = ProcessPoolExecutor(max_workers=workers) if workers > 1 else None
-    try:
+    with _Runner(store, workers, log) as r:
         for d in src["mtproto"]:
-            # entities first (sequential: small relative to messages, order-dependent)
-            g = Graph()
-            ing = MTProtoIngester(g, d)
-            with ing.activity():
-                if ing.collector:
-                    ing.user(ing.collector, is_collector=True)
-                for chunk in _chunks(_lines(d / "entities.jsonl"), batch_size):
-                    for line in chunk:
-                        ing.entity(json.loads(line))
-                    take((g, _post(g, ext_opts, min_text_len)))
-                    g = Graph()
-                    ing.g = g
-                take((g, []))
-            jobs = ((str(d), chunk, ext_opts, min_text_len) for chunk in _chunks(_lines(d / "messages.jsonl"), batch_size))
-            if pool:
-                for res in _imap(pool, _mtproto_batch, jobs, workers):
-                    take(res)
-            else:
-                for job in jobs:
-                    take(_mtproto_batch(*job))
-
+            _lines_into(r, d, _lines(d / "entities.jsonl"), entities=True, batch_size=batch_size,
+                        ext_opts=ext_opts, min_text_len=min_text_len, include_collector=True)
+            _lines_into(r, d, _lines(d / "messages.jsonl"), entities=False, batch_size=batch_size,
+                        ext_opts=ext_opts, min_text_len=min_text_len)
         for rj in src["export"]:
-            g = Graph()
-            ing = DesktopExportIngester(g, rj)
-            with ing.activity():
-                ing._personal()
-                ing._contacts()
-                heads = []
-                for chat, left in [(c, False) for c in (ing.data.get("chats") or {}).get("list", [])] + \
-                                  [(c, True) for c in (ing.data.get("left_chats") or {}).get("list", [])]:
-                    h = ing.chat_header(chat, left)
-                    if h:
-                        heads.append((h, chat.get("messages", [])))
-            take((g, []))
-            jobs = ((str(rj), ckey, names, chunk, ext_opts, min_text_len)
-                    for (ckey, names), msgs in heads for chunk in _chunks(msgs, batch_size))
-            if pool:
-                for res in _imap(pool, _export_batch, jobs, workers):
-                    take(res)
-            else:
-                for job in jobs:
-                    take(_export_batch(*job))
-            ing.data = None
-    finally:
-        if pool:
-            pool.shutdown()
-    return totals
+            _export_into(r, rj, batch_size=batch_size, ext_opts=ext_opts, min_text_len=min_text_len)
+        return r.totals
 
 
 def _imap(pool, fn, jobs, workers: int):

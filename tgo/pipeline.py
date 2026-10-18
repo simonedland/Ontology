@@ -72,7 +72,7 @@ def build_graph(input_dir: str | Path, config: Config | None = None, *, auto_acc
     ``time_window`` keywords are shortcuts that override the corresponding config fields.
     Returns ``(graph, report)`` where ``report`` holds per-step counts and timings.
     """
-    cfg = copy.deepcopy(config) if config is not None else Config()
+    cfg = copy.deepcopy(config) if config is not None else Config.load()
     if auto_accept is not None:
         cfg.identity.auto_accept = auto_accept
     if time_window is not None:
@@ -103,6 +103,23 @@ def build_graph(input_dir: str | Path, config: Config | None = None, *, auto_acc
         for path in paths:
             step(f"ingest {name} {Path(path).name}", plugins.REGISTRY.sources[name].ingest, g, Path(path))
 
+    decisions = json.loads(src["judgements"].read_text(encoding="utf-8")) if src["judgements"] else None
+    analyse(g, cfg, decisions, step=step, report=report)
+    report["config"] = cfg.to_dict()
+    report["timings"] = timings
+    return g, report
+
+
+def analyse(g: Graph, cfg: Config, decisions: list | None = None, *, step=None, report: dict | None = None) -> dict:
+    """Extraction and every analysis (with plugin steps) on an already-ingested graph, in pipeline order.
+
+    Used by :func:`build_graph` and by the live server (``tgo.live``), which re-derives these layers on a
+    copy of its incrementally ingested base graph. ``step(name, fn, *a, **kw)`` may wrap each stage
+    (timing / logging); results are stored in ``report`` (returned).
+    """
+    report = {} if report is None else report
+    step = step or (lambda name, fn, *a, **kw: fn(*a, **kw))
+
     def builtin(name, fn, *a, **kw):
         report[name] = step(name, fn, *a, **kw)
         for s in plugins.steps_after(name, "memory"):
@@ -117,16 +134,14 @@ def build_graph(input_dir: str | Path, config: Config | None = None, *, auto_acc
     builtin("communities", communities.run, g, seeds=c.seeds, resolution=c.resolution,
             min_size=c.min_size, min_stability=c.min_stability, edge_weights=c.edge_weights,
             deterministic=c.deterministic)
-    decisions = json.loads(src["judgements"].read_text(encoding="utf-8")) if src["judgements"] else None
     i = cfg.identity
     builtin("identity", identity.run, g, decisions, min_score=i.min_score,
             auto_accept=i.auto_accept, weights=i.weights,
-            strong_identifiers=i.strong_identifiers, min_bio_len=i.min_bio_len)
+            strong_identifiers=i.strong_identifiers, min_bio_len=i.min_bio_len,
+            max_evidence_accounts=i.max_evidence_accounts)
     for s in plugins.orphan_steps("memory"):
         report[s.name] = step(s.name, s.fn, g, cfg)
-    report["config"] = cfg.to_dict()
-    report["timings"] = timings
-    return g, report
+    return report
 
 
 def layout(g: Graph, seed: int = 7, max_full: int = 2500) -> dict[str, tuple[float, float]]:
@@ -173,7 +188,7 @@ def run(input_dir: str | Path, out_dir: str | Path, config: Config | None = None
 
     Writes to ``out_dir`` and returns the summary dict (also saved as ``summary.json``).
     """
-    cfg = copy.deepcopy(config) if config is not None else Config()
+    cfg = copy.deepcopy(config) if config is not None else Config.load()
     if html is not None:
         cfg.viewer.html = html
     if choose_engine(input_dir, cfg) == "duckdb":

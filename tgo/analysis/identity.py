@@ -82,7 +82,7 @@ def _features(g: Graph, strong=None, min_bio_len: int = 15) -> dict[str, dict[st
 
 
 def score_candidates(g: Graph, min_score: float = 0.3, weights: dict[str, float] | None = None,
-                     strong_identifiers=None, min_bio_len: int = 15) -> list[dict]:
+                     strong_identifiers=None, min_bio_len: int = 15, max_evidence_accounts: int = 50) -> list[dict]:
     """Score account pairs by noisy-OR over shared non-biometric evidence (one vote per feature).
 
     Returns ``[{source, target, score, features, evidence}]`` sorted by score, >= ``min_score``.
@@ -92,8 +92,8 @@ def score_candidates(g: Graph, min_score: float = 0.3, weights: dict[str, float]
     pair_ev: dict[tuple[str, str], list[tuple[str, str, float]]] = defaultdict(list)
     for feat, groups in feats.items():
         for ev, accts in groups.items():
-            if len(accts) < 2:
-                continue
+            if len(accts) < 2 or len(accts) > max_evidence_accounts:
+                continue   # fan-out cap: stock evidence would otherwise create O(n^2) pairs
             # IDF down-weighting: an identifier / avatar shared by many accounts (stock image,
             # default avatar, exchange deposit address) is weak evidence of a shared operator
             idf = min(1.0, 2.0 / len(accts))
@@ -218,7 +218,7 @@ class Resolver:
 
 def run(g: Graph, decisions: list[dict] | None = None, min_score: float = 0.3,
         auto_accept: float | None = None, weights: dict[str, float] | None = None,
-        strong_identifiers=None, min_bio_len: int = 15) -> dict:
+        strong_identifiers=None, min_bio_len: int = 15, max_evidence_accounts: int = 50) -> dict:
     """Write scored candidates, apply the optional auto-accept policy, then analyst ``decisions``.
 
     ``decisions`` = ``[{source, target, judgement, decidedBy, legalBasis?, rationale?}]``.
@@ -231,7 +231,7 @@ def run(g: Graph, decisions: list[dict] | None = None, min_score: float = 0.3,
             "tool": "tgo-xref", "version": "0.1 (nomenklatura judgement model)", "codeLicense": "MIT",
             "weightsLicense": "n/a"}, algorithm="noisy_or_evidence", weights=weights, min_score=min_score,
             auto_accept=auto_accept):
-        for c in score_candidates(g, min_score, weights, strong_identifiers, min_bio_len):
+        for c in score_candidates(g, min_score, weights, strong_identifiers, min_bio_len, max_evidence_accounts):
             res.suggest(c["source"], c["target"], c["score"], c["features"], c["evidence"], "tgo-xref:noisy-or")
             out["candidates"] += 1
             if auto_accept is not None and c["score"] >= auto_accept:

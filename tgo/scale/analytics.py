@@ -27,13 +27,18 @@ import time
 from collections import Counter, defaultdict
 
 from .. import keys as K
+from ..analysis.coordination import poisson_sf
 from ..graph import Graph
 
 AGENT = {"codeLicense": "MIT", "weightsLicense": "n/a"}
 
 
 def _run(store, kind: str, key: str, tool: str, version: str, **params) -> str:
-    """Write a DetectionRun + ModelAgent through a tiny Graph and return the run key."""
+    """Write a DetectionRun + ModelAgent through a tiny Graph and return the run key.
+
+    The run's previous output is retracted first, so every analysis is safely re-runnable
+    (live updates, new data) without stale clusters/candidates."""
+    store.retract_run(f"run:{key}")
     g = Graph()
     with g.activity(kind, key, agent={"tool": tool, "version": version, **AGENT}, **params) as rk:
         pass
@@ -121,7 +126,7 @@ def coordination(store, *, time_window: int = 60, min_participation: int = 2, ma
     """CooRTweet in SQL with blocking, fan-out cap and Poisson null model; writes pair edges and clusters."""
     c = store.con
     W = int(time_window)
-    rk = _run(store, "DetectionRun", f"coortweet-sql:w{W}:m{min_participation}", "tgo-coortweet-sql", "0.2",
+    rk = _run(store, "DetectionRun", "coordination", "tgo-coortweet-sql", "0.2",
               algorithm="coortweet", time_window=W, min_participation=min_participation, max_p=max_p,
               null_model="poisson", max_object_accounts=max_object_accounts, blocking="object+time-bucket")
     # 1. first share per (account, object); object fan-out cap
@@ -180,7 +185,7 @@ def coordination(store, *, time_window: int = 60, min_participation: int = 2, ma
         GROUP BY p.a, p.b, p.observed""").fetchall()
     keep = []
     for a, b, obs, lam in rows:
-        pv = _poisson_sf(int(obs), float(lam or 0.0))
+        pv = poisson_sf(int(obs), float(lam or 0.0))   # same function as the memory engine
         if max_p is None or pv <= max_p:
             keep.append((a, b, float(lam or 0.0), pv))
     import pyarrow as pa
@@ -254,29 +259,16 @@ def coordination(store, *, time_window: int = 60, min_participation: int = 2, ma
             "same_creation_date": n_day, "objects_dropped_fanout": dropped}
 
 
-def _poisson_sf(k: int, lam: float) -> float:
-    if k <= 0:
-        return 1.0
-    try:
-        from scipy.stats import poisson
-
-        return float(poisson.sf(k - 1, lam))
-    except ImportError:
-        from ..analysis.coordination import poisson_sf
-
-        return poisson_sf(k, lam)
-
-
 # ======================================================= perceptual near-dups
-def near_duplicates(store, *, threshold: int | None = None, k: int = 16, exact_limit: int = 2_000_000,
-                    log=print) -> dict:
+def near_duplicates(store, *, threshold: int | None = None, exact_limit: int = 2_000_000, log=print) -> dict:
     """All perceptual near-duplicate pairs (Hamming <= threshold) across every fingerprint in the store.
 
     Exact (Faiss IndexBinaryFlat range search) up to ``exact_limit`` distinct fingerprints, near-exact
     multi-index hashing beyond; every candidate is confirmed with an exact Hamming distance.  Without
-    Faiss a Python band index is used (exact, slower).  ``k`` is kept for config compatibility.
+    Faiss a Python band index is used (exact, slower).
     """
     """Perceptual near-duplicates across all fingerprints (Faiss HNSW, band-index fallback)."""
+    store.retract_run("run:near-duplicates")   # even if nothing is found now, old pairs must go
     rows = store.con.execute("""SELECT key, json_extract_string(props, '$.algorithm'),
                                        json_extract_string(props, '$.hashHex') FROM nodes
                                 WHERE list_contains(labels, 'MediaFingerprint')""").fetchall()
@@ -325,8 +317,8 @@ def near_duplicates(store, *, threshold: int | None = None, k: int = 16, exact_l
             method = "band-index"
     if not pairs:
         return {"fingerprints": len(rows), "pairs": 0, "method": method}
-    rk = _run(store, "DetectionRun", f"neardup:{method}", f"tgo-neardup-{method}", "0.3",
-              exact_limit=exact_limit)
+    rk = _run(store, "DetectionRun", "near-duplicates", f"tgo-neardup-{method}", "0.3",
+              method=method, exact_limit=exact_limit)
     import pyarrow as pa
 
     t = pa.table({"fa": [p[0] for p in pairs], "fb": [p[1] for p in pairs], "d": [p[2] for p in pairs],
@@ -366,6 +358,7 @@ def communities(store, *, seeds: int = 10, resolution: float = 1.0, min_size: in
         FROM edges JOIN wt USING (type) WHERE src_id <> dst_id GROUP BY 1, 2""")
     arr = arr.to_arrow_table() if hasattr(arr, "to_arrow_table") else arr.fetch_arrow_table()
     if arr.num_rows == 0:
+        store.retract_run("run:communities")
         return {"nodes": 0, "edges": 0, "clusters": 0}
     u = arr.column("u").to_numpy()
     v = arr.column("v").to_numpy()
@@ -403,7 +396,7 @@ def communities(store, *, seeds: int = 10, resolution: float = 1.0, min_size: in
         modularity = None
         tool, version = "networkx.louvain_communities", nx.__version__
     elapsed = time.perf_counter() - t0
-    rk = _run(store, "DetectionRun", f"louvain-scale:r{resolution}:s{seeds}", tool, version, algorithm="louvain",
+    rk = _run(store, "DetectionRun", "communities", tool, version, algorithm="louvain",
               seeds=seeds, resolution=resolution, min_size=min_size, min_stability=min_stability,
               edge_weights=weights, seconds=round(elapsed, 2),
               reproducible=bool(deterministic) or tool.startswith("networkx"))
@@ -460,14 +453,15 @@ def communities(store, *, seeds: int = 10, resolution: float = 1.0, min_size: in
         SELECT k, fin, fout, (SELECT max(fin) FROM j) AS mx FROM j""")
     roles = c.execute("""SELECT k, fin, fout, mx FROM roles""").fetchall()
     g = Graph()
-    for k, fin, fout, mx in roles:
-        r = []
-        if fin >= 0.5 * (mx or 1) and fin >= 3:
-            r.append("originator")
-        if fout >= 2:
-            r.append("amplifier")
-        if r:
-            g.node(k, networkRoles=r, networkRoleStatus="inferred", forwardedByCount=int(fin), forwardsCount=int(fout))
+    with g.activity("DetectionRun", rk[4:]):   # roles are retractable with the run
+        for k, fin, fout, mx in roles:
+            r = []
+            if fin >= 0.5 * (mx or 1) and fin >= 3:
+                r.append("originator")
+            if fout >= 2:
+                r.append("amplifier")
+            if r:
+                g.node(k, networkRoles=r, networkRoleStatus="inferred", forwardedByCount=int(fin), forwardsCount=int(fout))
     store.flush(g)
     return {"nodes": n, "edges": len(u), "clusters": clusters, "rejected_unstable": rejected,
             "engine": tool, "seconds": round(elapsed, 2)}
@@ -537,10 +531,21 @@ def identity(store, decisions=None, *, min_score: float = 0.3, auto_accept: floa
     existing = [k for (k,) in c.execute("""SELECT key FROM nodes WHERE list_contains(labels, 'IdentityJudgement')
                                            OR list_contains(labels, 'PersonCluster')""").fetchall()]
     accts = {x for a, b, *_ in cands for x in (a, b)} | {d[k] for d in (decisions or []) for k in ("source", "target")}
-    sub = store.subgraph(set(existing) | accts) if (existing or accts) else Graph()
+    # decisions given (judgements.json = source of truth): recompute identity from scratch, exactly like
+    # a batch run - retract previous suggestions *and* previously replayed decisions, then replay.
+    # decisions None: keep existing analyst decisions and only refresh the algorithmic suggestions.
+    fresh = decisions is not None
+    store.retract_run("run:identity", *(["run:analyst-judgements"] if fresh else []))
+    store.finalize()
+    if fresh:
+        sub = Graph()
+    else:
+        existing = [k for (k,) in c.execute("""SELECT key FROM nodes WHERE list_contains(labels, 'IdentityJudgement')
+                                               OR list_contains(labels, 'PersonCluster')""").fetchall()]
+        sub = store.subgraph(set(existing) | accts) if (existing or accts) else Graph()
     res = Resolver(sub)
     out = {"candidates": len(cands), "decisions": [], "auto_accepted": 0, "evidence_keys_capped": capped}
-    with sub.activity("DetectionRun", f"xref:noisy-or-sql:min{min_score}", agent={
+    with sub.activity("DetectionRun", "identity", agent={
             "tool": "tgo-xref-sql", "version": "0.2 (nomenklatura judgement model)", **AGENT},
             algorithm="noisy_or_evidence", weights=weights, min_score=min_score, auto_accept=auto_accept,
             max_evidence_accounts=max_evidence_accounts):
@@ -554,5 +559,8 @@ def identity(store, decisions=None, *, min_score: float = 0.3, auto_accept: floa
             for d in decisions:
                 out["decisions"].append(res.decide(d["source"], d["target"], d["judgement"], d["decidedBy"],
                                                    d.get("legalBasis"), d.get("rationale")))
-    store.replace(sub)   # sub was loaded from the store: replace, don't re-merge (counts would double)
+    if fresh:
+        store.flush(sub)
+    else:
+        store.replace(sub)   # sub was loaded from the store: replace, don't re-merge (counts would double)
     return out

@@ -100,3 +100,24 @@ jobs:
               raise SystemExit(f\"DuckDB allowed: {q}\")
           "
             test ! -e ~/.duckdb'
+
+  # The compose stack: image builds (with its offline-check), pipeline services under network_mode none
+  # and a read-only root, DuckDB engine included, then the test suite inside the dev image.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run containers as the runner user (bind-mounted outputs stay writable)
+        run: echo "TGO_UID=$(id -u)" >> "$GITHUB_ENV" && echo "TGO_GID=$(id -g)" >> "$GITHUB_ENV"
+      - run: docker compose config -q && docker compose --profile '*' config -q
+      - run: docker compose build tgo test
+      - name: Demo and DuckDB engine with no network
+        run: |
+          mkdir -p workspace/out
+          docker compose run --rm demo
+          test -s workspace/out/demo/report.html && test -s workspace/out/demo/dashboard.html
+          docker compose run --rm tgo sh -euc '
+            python -P -m tgo run --input /out/demo/input --out /out/scale --engine duckdb
+            test ! -e ~/.duckdb'
+          test -s workspace/out/scale/report.html && test -s workspace/out/scale/neo4j/nodes.csv
+      - run: docker compose run --rm test

@@ -11,6 +11,8 @@ python -m tgo dashboard --out out/case --open                  # or for any exis
 python -m tgo demo --dashboard --open                          # try it on the fictional demo case
 ```
 
+To keep it current while new data arrives, run it live with `tgo serve` (see [live.md](live.md)).
+
 It works with both engines. With `--engine duckdb`, totals, flows and activity come from SQL over the whole
 corpus, and the relation network and schema graph show the bounded case slice. The page says so under the
 filters.

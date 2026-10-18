@@ -1,0 +1,21 @@
+# Build context: only what the image needs (keeps case data, outputs and secrets out of layers).
+# Docs/config files are included because the test suite checks the links in docs/.
+**
+!pyproject.toml
+!README.md
+!CONTRIBUTING.md
+!Telegram media ontology and visualization.md
+!tgo/
+!docker/
+!tests/
+!examples/
+!docs/
+!scripts/
+!compose.yaml
+!Dockerfile
+!.env.example
+!.github/workflows/
+!workspace/README.md
+!workspace/config/tgo.example.toml
+**/__pycache__
+**/*.py[cod]

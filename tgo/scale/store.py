@@ -40,11 +40,13 @@ CREATE TABLE IF NOT EXISTS staging_edges (id VARCHAR, type VARCHAR, src VARCHAR,
     evidence VARCHAR[], runs VARCHAR[], props JSON, seq BIGINT, derived BOOLEAN, h UHUGEINT, hs UHUGEINT,
     hd UHUGEINT);
 CREATE TABLE IF NOT EXISTS shares (object_id VARCHAR, kind VARCHAR, account VARCHAR, content VARCHAR, ts BIGINT);
+CREATE TABLE IF NOT EXISTS retracted (kind VARCHAR, h UHUGEINT);
 CREATE SEQUENCE IF NOT EXISTS flush_seq;
 """
 
 
 _EDGE_SCHEMA = None
+_PROVENANCE = {"ASSOCIATED_WITH", "GENERATED_BY", "USED"}
 
 
 def to_arrow(g: Graph) -> dict:
@@ -99,7 +101,9 @@ def to_arrow(g: Graph) -> dict:
             cols["runs"].append(runs)
             cols["props"].append(json.dumps({k: v for k, v in p.items() if k not in _EDGE_COLS},
                                             default=str, ensure_ascii=False))
-            cols["derived"].append(bool(runs) and all(r in detection_runs for r in runs))
+            # provenance edges (run->agent, cluster->run) are facts about the pipeline, not observations:
+            # idempotent across batches like derivations
+            cols["derived"].append(e.type in _PROVENANCE or (bool(runs) and all(r in detection_runs for r in runs)))
         out["edges"] = pa.table(cols, schema=_EDGE_SCHEMA)
     return out
 
@@ -198,6 +202,26 @@ class Store:
         self.con.execute("DELETE FROM staging_edges WHERE id IN (SELECT k FROM et)")
         return self.flush(g)
 
+    def retract_run(self, *run_keys: str) -> tuple[int, int]:
+        """Remove everything produced *only* by ``run_keys`` so the analysis can be re-run cleanly.
+
+        Re-running a deterministic analysis (live mode, new data) must not leave stale results
+        (old clusters, candidates that no longer hold).  Rows that other runs also vouch for
+        (e.g. a candidate an analyst decided on) are kept.  The next :meth:`finalize` drops or
+        recomputes the affected final rows.
+        """
+        c = self.con
+        keys = list(run_keys)
+        only_e = "len(runs) > 0 AND list_has_all(?::VARCHAR[], runs)"          # every vouching run is retracted
+        only_n = "len(sources) > 0 AND list_has_all(?::VARCHAR[], sources)"
+        c.execute(f"INSERT INTO retracted SELECT 'e', h FROM staging_edges WHERE {only_e}", [keys])
+        ne = c.execute(f"DELETE FROM staging_edges WHERE {only_e}", [keys]).fetchone()[0]
+        c.execute(f"INSERT INTO retracted SELECT 'n', h FROM staging_nodes WHERE {only_n}", [keys])
+        nn = c.execute(f"DELETE FROM staging_nodes WHERE {only_n}", [keys]).fetchone()[0]
+        if ne or nn:
+            self.finalized = False
+        return nn, ne
+
     def add_shares(self, rows: Iterable[tuple]) -> int:
         """Append coordination share rows ``(object_id, kind, account, content, ts)``."""
         import pyarrow as pa
@@ -261,7 +285,9 @@ class Store:
             c.execute("CREATE OR REPLACE TEMP VIEW sn AS SELECT * FROM staging_nodes")
             c.execute("CREATE OR REPLACE TEMP TABLE aff_f AS SELECT DISTINCT h FROM staging_fields")
         else:
-            c.execute(f"CREATE OR REPLACE TEMP TABLE aff_e AS SELECT DISTINCT h FROM staging_edges WHERE seq > {wm}")
+            c.execute(f"""CREATE OR REPLACE TEMP TABLE aff_e AS SELECT DISTINCT h FROM (
+                          SELECT h FROM staging_edges WHERE seq > {wm}
+                          UNION ALL SELECT h FROM retracted WHERE kind = 'e')""")
             c.execute(f"CREATE OR REPLACE TEMP TABLE aff_f AS SELECT DISTINCT h FROM staging_fields WHERE seq > {wm}")
             c.execute("CREATE OR REPLACE TEMP TABLE s AS SELECT * FROM staging_edges SEMI JOIN aff_e USING (h)")
         # ---- edges (merged; dense node ids added below)
@@ -272,9 +298,11 @@ class Store:
         # incremental: only nodes with new staging rows, or endpoints not yet in ``nodes``, need work;
         # existing endpoints of new edges (e.g. 1M accounts behind POSTED_IN) keep their merged row/id
         known = "" if full else "ANTI JOIN nodes USING (h)"
+        retracted_nodes = "" if full else             "UNION ALL SELECT r.h, n.key FROM retracted r JOIN nodes n USING (h) WHERE r.kind = 'n'"
         c.execute(f"""CREATE OR REPLACE TEMP TABLE aff_n AS
                       SELECT h, any_value(key) AS key FROM (
                           SELECT h, key FROM staging_nodes {newer}
+                          {retracted_nodes}
                           UNION ALL SELECT * FROM (SELECT hs AS h, src AS key FROM e_new UNION ALL
                                                    SELECT hd, dst FROM e_new) {known}) GROUP BY h""")
         if not full:
@@ -314,6 +342,12 @@ class Store:
         else:
             c.execute("DELETE FROM fields WHERE h IN (SELECT h FROM aff_f)")
             c.execute(f"INSERT INTO fields {self._FIELDS}")
+        if not full:   # nodes left with no staging rows and no incident edge are gone (retracted)
+            c.execute("""DELETE FROM nodes WHERE h IN (SELECT h FROM retracted WHERE kind = 'n')
+                         AND NOT EXISTS (SELECT 1 FROM staging_nodes sn_ WHERE sn_.h = nodes.h)
+                         AND NOT EXISTS (SELECT 1 FROM edges e_ WHERE e_.src_id = nodes.id)
+                         AND NOT EXISTS (SELECT 1 FROM edges e_ WHERE e_.dst_id = nodes.id)""")
+        c.execute("DELETE FROM retracted")
         c.execute("INSERT OR REPLACE INTO tgo_meta VALUES ('finalized_seq', ?)", [top])
         views = {"s", "sn"} if full else set()
         for t in ("s", "multi", "e_new", "sn", "nmulti", "n_new", "aff_e", "aff_n", "aff_f", "n_old"):

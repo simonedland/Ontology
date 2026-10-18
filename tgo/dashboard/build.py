@@ -447,15 +447,25 @@ def build_dashboard(out_dir: str | Path, *, path: str | Path | None = None, max_
     return write_html(data, Path(path) if path else out / "dashboard.html")
 
 
-def write_html(data: dict, path: Path) -> Path:
-    tpl = (HERE / "template.html").read_text(encoding="utf-8")
-    js = (VENDOR / "echarts.min.js").read_text(encoding="utf-8").replace("</script", "<\\/script")
+_ASSETS: dict[str, str] = {}
+
+
+def render_html(data: dict, *, live: bool = False) -> str:
+    """The dashboard page for ``data``; ``live=True`` makes it subscribe to ``tgo serve`` for updates."""
+    if not _ASSETS:
+        _ASSETS["tpl"] = (HERE / "template.html").read_text(encoding="utf-8")
+        js = (VENDOR / "echarts.min.js").read_text(encoding="utf-8").replace("</script", "<\\/script")
+        notice = (VENDOR / "NOTICE-echarts.txt").read_text(encoding="utf-8") \
+            if (VENDOR / "NOTICE-echarts.txt").exists() else ""
+        _ASSETS["js"] = "/*! Apache ECharts NOTICE (Apache-2.0 section 4(d)):\n" + notice.replace("*/", "* /") + "*/\n" + js
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"), default=str).replace("<", "\\u003c")
-    notice = (VENDOR / "NOTICE-echarts.txt").read_text(encoding="utf-8") if (VENDOR / "NOTICE-echarts.txt").exists() else ""
-    js = "/*! Apache ECharts NOTICE (Apache-2.0 section 4(d)):\n" + notice.replace("*/", "* /") + "*/\n" + js
-    html = (tpl.replace("/*__ECHARTS__*/", js, 1)
-               .replace("__TGO_DASH__", payload, 1)
-               .replace("__TITLE__", data["meta"]["title"].replace("&", "&amp;").replace("<", "&lt;")))
+    return (_ASSETS["tpl"].replace("/*__ECHARTS__*/", _ASSETS["js"], 1)
+            .replace("__TGO_DASH__", payload, 1)
+            .replace("__TGO_LIVE__", "true" if live else "false", 1)
+            .replace("__TITLE__", data["meta"]["title"].replace("&", "&amp;").replace("<", "&lt;")))
+
+
+def write_html(data: dict, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(html, encoding="utf-8")
+    path.write_text(render_html(data), encoding="utf-8")
     return path

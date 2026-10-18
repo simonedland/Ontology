@@ -97,26 +97,30 @@ def near_pairs(hashes: dict[str, PHash]):
     Avoids O(n^2) at archive scale (production: Faiss IndexBinaryFlat / range search)."""
     from collections import defaultdict
 
-    by_algo: dict[str, list[str]] = defaultdict(list)
-    for k, h in hashes.items():
-        by_algo[h.algo].append(k)
-    seen = set()
-    for algo, ks in by_algo.items():
-        h0 = hashes[ks[0]]
+    # identical hashes (one meme reposted 100k times) are grouped first: they are already linked by
+    # their shared MediaFingerprint node, so only *distinct* hash values are compared (no k^2 blow-up)
+    by_algo: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
+    for k, h in sorted(hashes.items()):
+        by_algo[h.algo][h.hex].append(k)
+    for algo, groups in by_algo.items():
+        h0 = hashes[next(iter(groups.values()))[0]]
         nb = h0.threshold + 1
         bounds = [round(i * h0.bits / nb) for i in range(nb + 1)]
         buckets: dict[tuple, list[str]] = defaultdict(list)
-        for k in sorted(ks):
-            v = int(hashes[k].hex, 16)
+        for hx in sorted(groups):
+            v = int(hx, 16)
             for bi in range(nb):
                 lo, hi = bounds[bi], bounds[bi + 1]
-                buckets[(bi, (v >> lo) & ((1 << (hi - lo)) - 1))].append(k)
+                buckets[(bi, (v >> lo) & ((1 << (hi - lo)) - 1))].append(hx)
+        seen = set()
         for members in buckets.values():
             for i, a in enumerate(members):
                 for b in members[i + 1:]:
                     if (a, b) not in seen:
                         seen.add((a, b))
-                        yield a, b
+                        for ka in groups[a]:
+                            for kb in groups[b]:
+                                yield ka, kb
 
 
 # ------------------------------------------------------------------------ EXIF

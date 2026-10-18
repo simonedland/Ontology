@@ -47,6 +47,13 @@ header.top .wrap { display: flex; align-items: center; gap: 14px; padding-top: 1
 .brand h1 { font-size: 16px; font-weight: 650; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .badge { font-size: 12px; color: var(--ink-2); border: 1px solid var(--ring); border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
 .spacer { flex: 1; }
+.badge.live { display: inline-flex; align-items: center; gap: 7px; color: var(--ink); }
+.badge.live i { width: 8px; height: 8px; border-radius: 50%; background: var(--good); animation: pulse 2s infinite; }
+.badge.live.down i { background: var(--critical); animation: none; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--good) 60%, transparent); } 70% { box-shadow: 0 0 0 8px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .badge.live i { animation: none; } }
+.flash { animation: flash 1.2s ease-out; }
+@keyframes flash { from { background: var(--accent-wash); } to { background: var(--surface); } }
 .iconbtn { border: 1px solid var(--ring); background: var(--surface); border-radius: 10px; padding: 6px 10px; cursor: pointer; }
 .iconbtn:hover { background: var(--surface-2); }
 .filters { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; padding: 14px 0 6px; }
@@ -141,6 +148,7 @@ footer { color: var(--muted); font-size: 12px; margin-top: 32px; display: flex; 
   <div class="brand"><div class="mark" aria-hidden="true"></div><h1 id="title"></h1></div>
   <span class="badge" id="engine"></span>
   <span class="badge" id="generated"></span>
+  <span class="badge live" id="live" hidden role="status" aria-live="polite"><i aria-hidden="true"></i><span id="live-t">Live</span></span>
   <div class="spacer"></div>
   <a class="iconbtn" id="report-link" href="report.html" hidden>Open investigation view ↗</a>
   <button class="iconbtn" id="theme" type="button" aria-label="Toggle light or dark theme">◐ Theme</button>
@@ -156,6 +164,16 @@ footer { color: var(--muted); font-size: 12px; margin-top: 32px; display: flex; 
   <p class="sub" id="scope-note" style="color:var(--muted);font-size:12px;margin:0"></p>
 
   <div class="kpis" id="kpis"></div>
+
+  <section id="live-sec" hidden>
+    <div class="sec-h"><h3>Live ingestion</h3><p>New data is ingested as it lands in the input folder; every panel updates in place.</p></div>
+    <div class="grid">
+      <div class="card span-8" data-table="ingest"><div class="head"><div><h2>Ingested per update</h2><div class="sub">New messages per ingestion cycle</div></div>
+        <div class="tools"><button class="tbtn tv">Table</button></div></div>
+        <div id="ingest" class="chart" style="height:240px"></div><div class="tableview"></div></div>
+      <div class="card span-4"><div class="head"><div><h2>Recent updates</h2><div class="sub" id="ingest-status"></div></div></div><div class="scroll" id="ingest-log" style="max-height:250px"></div></div>
+    </div>
+  </section>
 
   <section>
     <div class="sec-h"><h3>Relations</h3><p>Who connects to whom, and through what. Message- and media-level facts are projected onto the chats and accounts that carry them.</p></div>
@@ -233,8 +251,9 @@ footer { color: var(--muted); font-size: 12px; margin-top: 32px; display: flex; 
 <script>/*__ECHARTS__*/</script>
 <script>
 "use strict";
-const D = JSON.parse(document.getElementById("tgo-dash").textContent);
-const S = D.style;
+let D = JSON.parse(document.getElementById("tgo-dash").textContent);
+let S = D.style;
+const LIVE = __TGO_LIVE__;
 const FAM_NAMES = {Account: "Accounts", Chat: "Chats & channels", Community: "Communities", InferredGroup: "Inferred groups",
   Group: "Groups", Person: "Person clusters", Identifier: "Identifiers", Device: "Devices & places", Media: "Media"};
 const STATUS_NAME = {observed: "Observed", inferred: "Inferred", file_declared: "File-declared", analyst: "Analyst"};
@@ -285,6 +304,7 @@ function renderHeader() {
   document.getElementById("engine").textContent = D.meta.engine === "duckdb" ? "DuckDB engine · corpus" : "Memory engine";
   const g = new Date(D.meta.generated * 1000);
   document.getElementById("generated").textContent = "Built " + g.toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  document.getElementById("generated").hidden = LIVE;
   document.getElementById("foot-gen").textContent = `${fmt(D.kpi.nodes)} nodes · ${fmt(D.kpi.relations)} relations · ${fmt(D.kpi.observations)} observations`;
   document.getElementById("scope-note").textContent = D.meta.scope_note || "";
   if (D.meta.hasReport) document.getElementById("report-link").hidden = false;
@@ -341,7 +361,7 @@ function renderFilters() {
 }
 
 // ---------------------------------------------------------------- network
-const NET = D.network, nodeById = new Map(NET.nodes.map(n => [n.id, n]));
+let NET = D.network, nodeById = new Map(NET.nodes.map(n => [n.id, n]));
 function netLinks() {
   return NET.links.filter(l => state.status.has(l.status) && l.conf >= state.minConf - 1e-9 && state.groups.has(l.group) &&
     (!state.time || l.t0 == null || (l.t0 <= state.time[1] && (l.t1 ?? l.t0) >= state.time[0])));
@@ -354,6 +374,7 @@ function renderNetwork() {
   const fams = [...new Set(NET.nodes.map(n => n.fam))].sort((a, b) => (S.familySlot[a] || 9) - (S.familySlot[b] || 9));
   const maxDeg = Math.max(1, ...nodes.map(n => n.deg)), topLabel = new Set([...nodes].sort((a, b) => b.deg - a.deg).slice(0, 18).map(n => n.id));
   const maxCount = Math.max(1, ...links.map(l => l.count));
+  const fresh = state.flashUntil > Date.now() ? new Set(NET.new || []) : new Set();   // just-ingested nodes glow
   const sc = 0.5 + 0.5 * Math.min(1, document.getElementById("network").clientWidth / 900);   // smaller marks on narrow screens
   document.getElementById("net-sub").textContent = `${nodes.length} of ${fmt(NET.total_actors)} actors · ${links.length} of ${fmt(NET.total_links)} relations shown` +
     (state.time ? " · time window active" : "");
@@ -381,8 +402,9 @@ function renderNetwork() {
       labelLayout: {hideOverlap: true}, progressive: big ? 400 : 0,
       data: nodes.map(n => ({id: n.id, name: n.name, raw: n, value: n.deg, category: fams.indexOf(n.fam), x: n.x, y: n.y,
         symbolSize: sc * (9 + 30 * Math.sqrt(n.deg / maxDeg)),
-        itemStyle: {borderColor: T.surface, borderWidth: 2, shadowBlur: n.id === state.selected ? 18 : 0, shadowColor: famColor(n.fam)},
-        label: {show: state.labels || topLabel.has(n.id) || n.id === state.selected, position: "right", color: T.ink, fontSize: 11,
+        itemStyle: {borderColor: fresh.has(n.id) ? T.ink : T.surface, borderWidth: 2,
+          shadowBlur: n.id === state.selected || fresh.has(n.id) ? 22 : 0, shadowColor: famColor(n.fam)},
+        label: {show: state.labels || topLabel.has(n.id) || n.id === state.selected || fresh.has(n.id), position: "right", color: T.ink, fontSize: 11,
           formatter: n.name.length > 28 ? n.name.slice(0, 27) + "…" : n.name, textBorderColor: T.surface, textBorderWidth: 3}})),
       links: links.map(l => ({source: l.s, target: l.t, raw: l,
         lineStyle: {color: groupColor(l.group), type: big && l.status === "observed" ? "solid" : statusDash(l.status),
@@ -522,7 +544,7 @@ function renderHier() {
 }
 
 // ---------------------------------------------------------------- activity
-const A = D.activity, dayMs = A.days.map(d => Date.parse(d + "T00:00:00Z"));
+let A = D.activity, dayMs = A.days.map(d => Date.parse(d + "T00:00:00Z"));
 function renderTimeline() {
   if (!A.days.length) { document.getElementById("timeline").replaceChildren(el("p", {class: "empty", text: "No dated messages in this store."})); return; }
   const c = chart("timeline"), slots = [1, 2, 3, 4, 5, 0];
@@ -533,7 +555,7 @@ function renderTimeline() {
       formatter: ps => `<div style="font-weight:600;margin-bottom:4px">${esc(ps[0].axisValueLabel)}</div>` + ps.filter(p => p.value).map(p => tipRow(p.color, fmt(p.value), p.seriesName)).join("") || "no messages"},
     xAxis: {type: "category", data: A.days, boundaryGap: false, ...axisBase(), splitLine: {show: false}},
     yAxis: {type: "value", ...axisBase(), minInterval: 1, axisLabel: {color: T.muted, formatter: v => fmt(v)}},
-    dataZoom: [{type: "slider", height: 22, bottom: 10, borderColor: T.ring, backgroundColor: T.surface2, fillerColor: "rgba(127,127,127,.12)",
+    dataZoom: [{type: "slider", height: 22, bottom: 10, ...zoomWindow(), borderColor: T.ring, backgroundColor: T.surface2, fillerColor: "rgba(127,127,127,.12)",
       dataBackground: {lineStyle: {color: T.axis}, areaStyle: {color: T.grid}}, textStyle: {color: T.muted}, handleStyle: {color: T.surface, borderColor: T.axis}},
       {type: "inside"}],
     series: A.series.map((s, i) => ({name: s.name, type: "line", stack: "all", smooth: 0.25, symbol: "none", data: s.data,
@@ -547,6 +569,12 @@ function renderTimeline() {
     clearTimeout(c._t); c._t = setTimeout(() => { renderNetwork(); if (state.selected) showDetails(state.selected); }, 120);
   });
   tables.timeline = () => [["Day", ...A.series.map(s => s.name)], A.days.map((d, i) => [d, ...A.series.map(s => s.data[i])])];
+}
+function zoomWindow() {   // keep the chosen time window across live re-renders
+  if (!state.time || !dayMs.length) return {};
+  let i0 = dayMs.findIndex(t => t / 1000 >= state.time[0]); if (i0 < 0) i0 = 0;
+  let i1 = dayMs.length - 1; while (i1 > 0 && dayMs[i1] / 1000 > state.time[1]) i1--;
+  return {startValue: i0, endValue: Math.max(i0, i1)};
 }
 function renderHeat() {
   if (!A.heat.length) return;
@@ -650,11 +678,11 @@ document.querySelectorAll(".card[data-table]").forEach(card => {
 // ---------------------------------------------------------------- search
 (function search() {
   const q = document.getElementById("q"), res = document.getElementById("q-res");
-  const idx = NET.nodes.map(n => ({id: n.id, name: n.name, fam: n.fam, hay: (n.name + " " + n.id).toLowerCase()}));
+  const idx = () => NET.nodes.map(n => ({id: n.id, name: n.name, fam: n.fam, hay: (n.name + " " + n.id).toLowerCase()}));
   let active = -1, items = [];
   const close = () => { res.hidden = true; active = -1; };
   q.oninput = () => { const s = q.value.trim().toLowerCase(); res.replaceChildren(); if (!s) return close();
-    items = idx.filter(n => n.hay.includes(s)).slice(0, 12);
+    items = idx().filter(n => n.hay.includes(s)).slice(0, 12);
     for (const [i, n] of items.entries()) { const li = el("li", {role: "option"}, el("span", {class: "dot", style: `width:9px;height:9px;border-radius:50%;background:${famColor(n.fam)}`}), n.name, el("small", {text: FAM(n.fam)}));
       li.onmousedown = e => { e.preventDefault(); pick(i); }; res.append(li); }
     res.hidden = !items.length; };
@@ -666,7 +694,64 @@ document.querySelectorAll(".card[data-table]").forEach(card => {
 
 // ---------------------------------------------------------------- wiring
 function update() { renderNetwork(); renderSankey(); renderChord(); renderSchema(); renderQuality(); renderConf(); if (state.selected) showDetails(state.selected); }
-function renderAll() { readTokens(); renderHeader(); renderKpis(); renderFilters(); update(); renderHier(); renderTimeline(); renderHeat(); renderRules(); renderFindings(); }
+function renderAll() { readTokens(); renderHeader(); renderKpis(); renderFilters(); update(); renderHier(); renderTimeline(); renderHeat(); renderRules(); renderFindings(); renderIngest(); }
+
+// ---------------------------------------------------------------- live mode (tgo serve)
+function setData(d) {
+  D = d; S = D.style; NET = D.network; nodeById = new Map(NET.nodes.map(n => [n.id, n]));
+  A = D.activity; dayMs = A.days.map(x => Date.parse(x + "T00:00:00Z"));
+}
+function applyUpdate(d) {
+  const c = charts.network, o = c && c.getOption().series && c.getOption().series[0];
+  const view = o ? {zoom: o.zoom, center: o.center} : null;      // keep the analyst's pan/zoom
+  setData(d);
+  state.flashUntil = Date.now() + 8000;
+  renderAll();
+  if (view && view.center && charts.network) charts.network.setOption({series: [{zoom: view.zoom, center: view.center}]});
+  setTimeout(() => { if (Date.now() >= state.flashUntil) renderNetwork(); }, 8100);
+  document.querySelectorAll(".kpi").forEach(k => { k.classList.remove("flash"); void k.offsetWidth; k.classList.add("flash"); });
+}
+function renderIngest() {
+  const sec = document.getElementById("live-sec"); sec.hidden = !D.live; if (!D.live) return;
+  const ev = D.live.events || [], times = ev.map(e => new Date(e.t * 1000).toISOString().slice(11, 19));
+  chart("ingest").setOption({
+    grid: {left: 44, right: 12, top: 14, bottom: 28},
+    tooltip: {...tooltipBase(), trigger: "axis", axisPointer: {type: "shadow", shadowStyle: {color: "rgba(127,127,127,.08)"}}, formatter: ps => { const e = ev[ps[0].dataIndex];
+      return `<div style="font-weight:600;margin-bottom:4px">${esc(ps[0].axisValueLabel)} UTC</div>` + tipRow(slotColor(1), fmt(e.messages || 0), "new messages") +
+        tipRow(slotColor(3), fmt(e.nodes || 0), "new nodes") + tipRow(slotColor(3), fmt(e.edges || 0), "new relations") +
+        `<div style="color:${T.muted};margin-top:2px">updated in ${esc(e.seconds)}s${e.rebuild ? " · " + esc(e.rebuild) : ""}</div>`; }},
+    xAxis: {type: "category", data: times, ...axisBase(), splitLine: {show: false}},
+    yAxis: {type: "value", ...axisBase(), minInterval: 1, axisLabel: {color: T.muted, formatter: v => fmt(v)}},
+    series: [{type: "bar", barMaxWidth: 18, data: ev.map(e => e.messages || 0), itemStyle: {color: slotColor(1), borderRadius: [4, 4, 0, 0]}}],
+  }, true);
+  tables.ingest = () => [["Time (UTC)", "New messages", "New nodes", "New relations", "Seconds", "Note"],
+    ev.map((e, i) => [times[i], e.messages || 0, e.nodes || 0, e.edges || 0, e.seconds, e.rebuild || (e.sources || []).join(", ")])];
+  document.getElementById("ingest-log").replaceChildren(table(["When (UTC)", "Change"], ev.slice().reverse().slice(0, 14).map(e => ({cells: [
+    new Date(e.t * 1000).toISOString().slice(11, 19),
+    e.rebuild ? `rebuilt: ${e.rebuild}` : `+${fmt(e.messages || 0)} messages · +${fmt(e.nodes || 0)} nodes` + ((e.sources || []).length ? ` · new: ${e.sources.join(", ")}` : "")]}))));
+  document.getElementById("ingest-status").textContent = `version ${D.live.version} · ${D.live.engine} engine · watching ${D.live.input}`;
+}
+function setLive(ok, updated) {
+  const b = document.getElementById("live"), t = document.getElementById("live-t"); b.hidden = false;
+  b.classList.toggle("down", !ok); if (updated) state.updated = updated;
+  const ago = state.updated ? Math.max(0, Math.round(Date.now() / 1000 - state.updated)) : null;
+  t.textContent = ok ? `Live · updated ${ago == null ? "now" : ago < 60 ? ago + "s ago" : Math.round(ago / 60) + "m ago"}` : "Reconnecting…";
+}
+function startLive() {
+  state.updated = D.live && D.live.updated;
+  let ok = true;
+  const es = new EventSource("api/events");        // the browser reconnects by itself
+  es.addEventListener("update", ev => {
+    ok = true; const m = JSON.parse(ev.data);
+    if (!D.live || m.version !== D.live.version)
+      fetch("api/dashboard", {cache: "no-store"}).then(r => r.json()).then(d => { applyUpdate(d); setLive(true, d.live.updated); }).catch(() => {});
+    setLive(true, m.updated);
+  });
+  es.onopen = () => { ok = true; setLive(true); };
+  es.onerror = () => { ok = false; setLive(false); };
+  setLive(true);
+  setInterval(() => setLive(ok), 1000);
+}
 const toggle = (id, key, fn) => { const b = document.getElementById(id); b.onclick = () => { state[key] = !state[key]; b.setAttribute("aria-pressed", String(state[key])); fn(); }; };
 toggle("net-labels", "labels", renderNetwork); toggle("sch-sub", "schSub", renderSchema); toggle("sch-prov", "schProv", renderSchema); toggle("hier-all", "hierAll", renderHier);
 document.getElementById("net-reset").onclick = () => { state.selected = null; chart("network").dispatchAction({type: "restore"}); chart("network").clear(); renderNetwork();
@@ -678,6 +763,7 @@ function setTheme(t) { try { localStorage.setItem("tgo-dash-theme", t); } catch 
 document.getElementById("theme").onclick = () => { const dark = getComputedStyle(document.documentElement).colorScheme.includes("dark"); setTheme(dark ? "light" : "dark"); };
 try { const t = localStorage.getItem("tgo-dash-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
 renderAll();
+if (LIVE) startLive();
 if (location.hash.startsWith("#/node/")) { const id = decodeURIComponent(location.hash.slice(7)); if (nodeById.has(id)) setTimeout(() => focusNode(id), 300); }
 let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => Object.values(charts).forEach(c => c.resize()), 120); });
 </script>

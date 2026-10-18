@@ -60,6 +60,23 @@ def _run(a) -> int:
     return 0
 
 
+def _serve(a) -> int:
+    from .live import LiveEngine
+    from .live.server import serve
+    from .pipeline import choose_engine
+
+    cfg = _cfg(a)
+    Path(a.input).mkdir(parents=True, exist_ok=True)       # an empty inbox is fine: data may arrive later
+    engine = a.engine or ("memory" if not any(Path(a.input).rglob("*")) else choose_engine(a.input, cfg))
+    def log(*parts):   # flushed: under Docker / a service manager stdout is a pipe
+        print(*parts, flush=True)
+
+    eng = LiveEngine(a.input, a.out, cfg, engine=engine, max_nodes=a.max_nodes, snapshots=not a.no_snapshots, log=log)
+    opener = (lambda srv, url: webbrowser.open(url)) if a.open else None
+    serve(eng, host=a.host, port=a.port, token=a.token, interval=a.interval, ready=opener, log=log)
+    return 0
+
+
 def _dashboard(a) -> int:
     from .dashboard import build_dashboard
 
@@ -88,7 +105,7 @@ def _collect(a) -> int:
 def _ontop(a) -> int:
     from .scale.ontop import write
 
-    print(f"wrote {write(a.out)}  (see deploy/ontop/docker-compose.yml)")
+    print(f"wrote {write(a.out)}  (serve it: docker compose --profile ontop up)")
     return 0
 
 
@@ -126,6 +143,22 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--open", action="store_true")
     r.add_argument("--dashboard", action="store_true", help="also write dashboard.html (interactive overview)")
     r.set_defaults(fn=_run)
+
+    v = sub.add_parser("serve", help="live dashboard: watch --input, ingest new data continuously, push updates (local web server)")
+    v.add_argument("--input", required=True, help="folder to watch (collections, Desktop exports, plugin files); may start empty")
+    v.add_argument("--out", required=True, help="where snapshots (graph.json, summary.json, validation.json) are kept current")
+    v.add_argument("--host", default="127.0.0.1", help="bind address (default: this machine only; others require a token)")
+    v.add_argument("--port", type=int, default=8765)
+    v.add_argument("--token", default=None, help="access token (generated automatically when binding beyond localhost)")
+    v.add_argument("--interval", type=float, default=5.0, help="seconds between scans of --input")
+    v.add_argument("--engine", choices=["memory", "duckdb"], default=None,
+                   help="memory = in-process graph (cases); duckdb = corpus store (millions); both ingest incrementally")
+    v.add_argument("--max-nodes", type=int, default=500, help="actors in the relation network")
+    v.add_argument("--no-snapshots", action="store_true", help="don't write graph.json/summary.json/validation.json each update")
+    v.add_argument("--config", default=None, help="JSON/TOML config file (see `tgo config`)")
+    v.add_argument("--plugin", action="append", default=None, help="Python module to load as a plugin (repeatable)")
+    v.add_argument("--open", action="store_true", help="open the dashboard in a browser")
+    v.set_defaults(fn=_serve)
 
     b = sub.add_parser("dashboard", help="build the interactive dashboard.html for an existing output folder")
     b.add_argument("--out", required=True, help="a TGO output folder (graph.json, or tgo.duckdb from the duckdb engine)")

@@ -27,6 +27,7 @@ RDF/Turtle, Neo4j, FtM (OpenAleph), STIX 2.1 (OpenCTI) and GEXF (Gephi). The who
 pip install -e .                 # core deps: networkx, pillow, numpy, scipy
 python -m tgo demo --open        # synthetic data -> full pipeline -> out/demo/report.html
 python -m tgo demo --dashboard   # ... plus out/demo/dashboard.html, the interactive overview
+python -m tgo serve --input data/inbox --out out/live --open   # live dashboard: ingests new data as it arrives
 ```
 
 To run it on real data:
@@ -57,10 +58,12 @@ python -m tgo collect --target @somechannel --limit 500 --out data/case/mtproto
 | [docs/extending.md](docs/extending.md) | add a source, extractor, analysis step, relation type, validation rule, export format or viewer tab |
 | [examples/](examples/README.md) | copy a working plugin template (CSV source, watchlist extractor, analysis step, SQL step, CSV exporter) |
 | [docs/scaling.md](docs/scaling.md) | run, tune and query the DuckDB engine for millions of entries |
+| [docs/live.md](docs/live.md) | run the dashboard live (`tgo serve`), with continuous ingestion of new collections and exports |
 | [docs/dashboard.md](docs/dashboard.md) | explore a store visually: relation network, flows, ontology, activity, evidence quality (`tgo dashboard`) |
 | [docs/data-model.md](docs/data-model.md) | consume TGO output: node and edge shapes, key formats, input and output file contracts |
 | [docs/vocabulary.md](docs/vocabulary.md) | look up any class or relation (generated from `tgo/ontology.py`) |
 | [docs/offline.md](docs/offline.md) | run air-gapped, add local AI models, or check the no-network guarantee |
+| [docs/docker.md](docs/docker.md) | run the whole stack in Docker (pipeline, viewer, live dashboard, collector, Neo4j, Ontop) and reshape it via `.env` / `workspace/` |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | set up a dev environment, run the tests and CI, re-pin vendored JS, release |
 
 ## What's in the box
@@ -176,6 +179,8 @@ python -m tgo run --input corpus --out out/corpus --engine duckdb --workers -1
 python scripts/gen_bench.py out/bench1m --messages 1000000   # reproducible fictional corpus with planted rings
 ```
 
+Inputs at scale: MTProto `messages.jsonl` is streamed line by line, but a Telegram Desktop `result.json` is parsed whole. For very large histories, export **per chat**: TGO discovers every `result.json` under `--input`. Every config field can also be set as `TGO_<SECTION>_<FIELD>` (e.g. `TGO_SCALE_WORKERS=4`, `TGO_SCALE_MEMORY_LIMIT=6GB`), which suits containers where `os.cpu_count()` reports host cores. The fan-out caps (`coordination.max_object_accounts`, `identity.max_evidence_accounts`) apply to **both** engines, so a viral meme or a stock avatar never causes quadratic pairing.
+
 `--engine auto` (the default) switches to DuckDB when the input exceeds `scale.auto_engine_bytes` (200 MB). Run `tgo config` to see every knob: batch size, workers, DuckDB threads, memory limit and spill directory, fan-out caps, viewer cap.
 
 **Measured** on a 12-core Windows laptop with the fictional `gen_bench.py` corpus (Zipf-skewed channels, popular URLs, forwards, group chatter, plus planted coordination rings):
@@ -192,8 +197,8 @@ python scripts/gen_bench.py out/bench1m --messages 1000000   # reproducible fict
 | Tier | When | What | Status in this repo |
 |---|---|---|---|
 | 1. Embedded lakehouse (default) | up to ~10⁸ edges on one workstation | DuckDB file + partitioned Parquet; NetworKit/Faiss for algorithms | `tgo run --engine duckdb` (benchmarked below) |
-| 2. Ontology/SPARQL view | ontology-aligned queries without copying data | **Ontop** virtual knowledge graph (Apache-2.0) translating SPARQL to SQL over `tgo.duckdb` (read-only) | `tgo ontop --out DIR` + `deploy/ontop/` (pinned image; verified with live SPARQL) |
-| 3. Interactive graph server | multi-analyst exploration from ~3×10⁸ to 10⁹+ edges | **Neo4j 5.26 LTS** in Docker on an on-prem Linux host, bulk-loaded with `neo4j-admin import` from `out/neo4j/`; ~120–200 GB store and 128–256 GB RAM per 10⁹ edges (research estimate) | `deploy/neo4j/` (digest-pinned, telemetry off, localhost-bound; import and Cypher verified) |
+| 2. Ontology/SPARQL view | ontology-aligned queries without copying data | **Ontop** virtual knowledge graph (Apache-2.0) translating SPARQL to SQL over `tgo.duckdb` (read-only) | `tgo ontop --out DIR` + `docker compose --profile ontop up` (pinned image; verified with live SPARQL) |
+| 3. Interactive graph server | multi-analyst exploration from ~3×10⁸ to 10⁹+ edges | **Neo4j 5.26 LTS** in Docker on an on-prem Linux host, bulk-loaded with `neo4j-admin import` from `out/neo4j/`; ~120–200 GB store and 128–256 GB RAM per 10⁹ edges (research estimate) | `docker compose --profile neo4j up` (digest-pinned, telemetry off, localhost-bound; import and Cypher verified) |
 | Microsoft Fabric | sanitised aggregates and Power BI only | OneLake from the Parquet export; Fabric Graph is SaaS-only (no air-gap), ≤2B elements, read-only GQL | Parquet export is compatible |
 
 Why this mix:

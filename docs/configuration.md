@@ -82,6 +82,7 @@ The rules:
 |---|---|
 | `python -m tgo demo` | `--out DIR` (default `out/demo`), `--config FILE`, `--auto-accept X`, `--open` |
 | `python -m tgo run` | `--input DIR` (required, searched recursively), `--out DIR` (required), `--config FILE`, `--auto-accept X`, `--time-window S`, `--no-html`, `--open` |
+| `python -m tgo serve` | `--input DIR`, `--out DIR` (required), `--interval S` (5), `--host` (127.0.0.1), `--port` (8765), `--token`, `--engine memory\|duckdb`, `--max-nodes N`, `--no-snapshots`, `--config`, `--plugin`, `--open`: live dashboard, see [live.md](live.md) |
 | `python -m tgo dashboard` | `--out DIR` (required: an output folder), `--path FILE`, `--max-nodes N` (500), `--open`. `run`/`demo` also take `--dashboard` |
 | `python -m tgo ontop` | `--out DIR`: writes the Ontop mapping for SPARQL over `tgo.duckdb` (see [scaling.md](scaling.md#deployment-tiers-where-the-data-lives)) |
 | `python -m tgo config` | `--config FILE`: prints the effective config as JSON |
@@ -113,6 +114,7 @@ CooRTweet-style coordination detection (`tgo.analysis.coordination`).
 | `coordination.min_cluster_size` | `3` | accounts needed for a CoordinationCluster node |
 | `coordination.same_day_min` | `3` | chats created on one day needed for SAME_CREATION_DATE edges |
 | `coordination.same_day_max` | `50` | ...and the upper bound (avoids cliques on bulk imports) |
+| `coordination.max_object_accounts` | `1000` | objects shared by more accounts are dropped before pairing (fan-out cap, both engines) |
 
 ### `communities`
 
@@ -157,6 +159,7 @@ Candidate scoring and judgements (`tgo.analysis.identity`).
 | `identity.weights` | see table below |  |
 | `identity.strong_identifiers` | `["CryptoAddress", "IBAN", "PhoneNumber", "Email"]` |  |
 | `identity.min_bio_len` | `15` | shorter bios are too generic to count as shared evidence |
+| `identity.max_evidence_accounts` | `50` | evidence keys shared by more accounts are ignored (fan-out cap, both engines) |
 
 `identity.weights` defaults (a partial override merges into these):
 
@@ -207,9 +210,6 @@ Engine selection and the DuckDB corpus engine (`tgo.scale`) for millions of entr
 | `scale.memory_limit` | `null` | DuckDB memory limit, e.g. "16GB" (spills to temp_directory beyond it) |
 | `scale.temp_directory` | `null` | DuckDB spill directory |
 | `scale.store_path` | `null` | DuckDB file (default <out>/tgo.duckdb) |
-| `scale.max_object_accounts` | `1000` | coordination: objects shared by more accounts are dropped (fan-out cap, logged) |
-| `scale.max_evidence_accounts` | `50` | identity: evidence keys shared by more accounts are ignored (fan-out cap) |
-| `scale.neardup_k` | `16` | (kept for compatibility; near-dup search is now exact range search) |
 | `scale.neardup_exact_limit` | `2000000` | distinct fingerprints up to which near-dup search is exact (Faiss flat) |
 | `scale.exports` | `["parquet", "neo4j", "ntriples"]` | bulk exports to write (n-triples is the slowest at 10M+) |
 | `scale.restrict_files` | `true` | DuckDB may only touch input/out/db/temp dirs (external access off); network is always off |
@@ -233,6 +233,7 @@ Extensions (`tgo.plugins`): extra sources, analysis steps and exporters.
 
 | Variable | Meaning |
 |---|---|
+| `TGO_<SECTION>_<FIELD>` | override any Config field, e.g. TGO_SCALE_WORKERS=4 (applied by Config.load) |
 | `TGO_DOMAIN` | namespace host for tg:/tgr: IRIs (default tgo.example.org) |
 | `TGO_WHISPER_MODEL` | local faster-whisper (CTranslate2) model dir; enables real ASR |
 | `TGO_OCR_MODELS` | local dir with RapidOCR det/cls/rec .onnx files; enables real OCR |

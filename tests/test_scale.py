@@ -17,7 +17,7 @@ from tgo.graph import Graph  # noqa: E402
 from tgo.scale.store import Store  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
-SKIP = {"ASSOCIATED_WITH", "GENERATED_BY"}
+SKIP = {"ASSOCIATED_WITH", "GENERATED_BY"}   # provenance names the tools that actually ran (differ per engine)
 
 
 @pytest.fixture(scope="module")
@@ -50,6 +50,8 @@ def test_engine_parity(demo, scale_run):
     a = {e.id for e in g.edges.values() if e.type not in SKIP}
     b = {e.id for e in h.edges.values() if e.type not in SKIP}
     assert a == b
+    # provenance is idempotent: re-entering a run in every batch is not a new event
+    assert all(e.props["count"] == 1 for e in h.edges.values() if e.type in SKIP)
     for i in a:
         ea, eb = g.edges[i].props, h.edges[i].props
         assert (ea.get("count"), round(ea["conf"], 6), ea["status"]) == (eb.get("count"), round(eb["conf"], 6), eb["status"]), i
@@ -148,3 +150,81 @@ def test_ontop_mapping_covers_vocabulary(scale_run):
     for q in re.findall(r"^source\t\t(.+)$", m, flags=re.M):
         s.sql(f"SELECT * FROM ({q}) LIMIT 1").fetchall()
     s.close()
+
+
+def test_analyses_are_rerunnable_without_stale_results(scale_run):
+    """Live/incremental mode: re-running an analysis replaces its previous output (no duplicates, no stale)."""
+    from tgo.scale import analytics as A
+
+    out, _ = scale_run
+    s = Store(out / "tgo.duckdb", allowed_directories=[out])
+    def snap():
+        return (s.sql("SELECT count(*), sum(count) FROM edges").fetchone(),
+                s.sql("SELECT count(*) FROM nodes WHERE list_contains(labels, 'CoordinationCluster')").fetchone()[0])
+    before = snap()
+    A.coordination(s, log=lambda *a: None)
+    A.aggregate(s)
+    s.finalize()
+    assert snap() == before                                   # idempotent re-run
+    A.coordination(s, min_participation=10_000, log=lambda *a: None)   # nothing qualifies any more
+    s.finalize()
+    assert snap()[1] == 0                                     # old clusters retracted, not left stale
+    assert s.sql("SELECT count(*) FROM edges WHERE type IN ('IDENTICAL_POST','SYNC_POST')").fetchone()[0] == 0
+    # analyst decisions survive an identity re-run
+    A.identity(s, None, log=lambda *a: None)
+    s.finalize()
+    assert s.sql("""SELECT count(*) FROM nodes WHERE list_contains(labels, 'PersonCluster')""").fetchone()[0] == 1
+    s.close()
+
+
+def test_incremental_append_matches_batch(demo, tmp_path):
+    """Live path at scale: ingest most messages, finalize+analyse, append the rest, re-analyse == one batch run."""
+    from tgo.scale import analytics as A
+    from tgo.scale.stream import ingest_dir, ingest_lines
+
+    lines = (demo / "mtproto" / "messages.jsonl").read_text(encoding="utf-8").splitlines()
+    part = tmp_path / "part"
+    import shutil
+
+    shutil.copytree(demo / "mtproto", part / "mtproto")
+    (part / "mtproto" / "messages.jsonl").write_text("\n".join(lines[:-40]) + "\n", encoding="utf-8")
+
+    def analyse(s):
+        s.finalize()
+        A.aggregate(s)
+        A.coordination(s, log=lambda *a: None)
+        s.finalize()
+
+    inc = Store()
+    ingest_dir(inc, part, workers=0, log=lambda *a: None)
+    analyse(inc)
+    ingest_lines(inc, part / "mtproto", lines[-40:], log=lambda *a: None)
+    analyse(inc)
+    full = Store()
+    shutil.copy(demo / "mtproto" / "messages.jsonl", part / "mtproto" / "messages.jsonl")
+    ingest_dir(full, part, workers=0, log=lambda *a: None)
+    analyse(full)
+    q = """SELECT id, count, round(conf, 6), status FROM edges WHERE type NOT IN ('ASSOCIATED_WITH','GENERATED_BY')
+           ORDER BY id"""
+    assert inc.sql(q).fetchall() == full.sql(q).fetchall()
+
+
+
+def test_analyse_store_twice_with_judgements_equals_batch(demo, tmp_path):
+    """analyse_store is idempotent including replayed analyst decisions (live mode)."""
+    import json as _j
+
+    from tgo.scale.pipeline import analyse_store
+    from tgo.scale.stream import ingest_dir
+
+    cfg = Config()
+    decisions = _j.loads((demo / "analyst" / "judgements.json").read_text(encoding="utf-8"))
+    q = """SELECT id, count, round(conf, 6), status FROM edges
+           WHERE type NOT IN ('ASSOCIATED_WITH','GENERATED_BY','USED') ORDER BY id"""
+    once, twice = Store(), Store()
+    for s in (once, twice):
+        ingest_dir(s, demo, workers=0, log=lambda *a: None)
+        analyse_store(s, cfg, decisions, log=lambda *a: None)
+    analyse_store(twice, cfg, decisions, log=lambda *a: None)
+    assert twice.sql(q).fetchall() == once.sql(q).fetchall()
+    assert twice.sql("SELECT count(*) FROM nodes WHERE list_contains(labels,'PersonCluster')").fetchone()[0] == 1

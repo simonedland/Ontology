@@ -110,7 +110,8 @@ def poisson_sf(k: int, lam: float) -> float:
 
 
 def detect_groups(shares: list[Share], time_window: int = 60, min_participation: int = 2,
-                  simhash_max_dist: int = 3, max_p: float | None = 1e-3) -> dict[tuple[str, str], dict]:
+                  simhash_max_dist: int = 3, max_p: float | None = 1e-3,
+                  max_object_accounts: int | None = None) -> dict[tuple[str, str], dict]:
     """CooRTweet pairs plus a null model (TGO addition).
 
     Plain CooRTweet keeps every pair with >= min_participation co-shares, which on real
@@ -134,6 +135,11 @@ def detect_groups(shares: list[Share], time_window: int = 60, min_participation:
             obj = f"neardup:{min(a.object_id, b.object_id)}"
             by_obj[obj] += [x for x in (a, b) if x not in by_obj[obj]]
 
+    if max_object_accounts:
+        # fan-out cap: an object shared by very many accounts (viral meme, popular URL) carries little
+        # pairwise signal and would make the pair loop quadratic; same rule as the DuckDB engine
+        for obj in [o for o, ss in by_obj.items() if len({x.account_id for x in ss}) > max_object_accounts]:
+            del by_obj[obj]
     pairs: dict[tuple[str, str], dict] = {}
     for obj, ss in by_obj.items():
         ss.sort(key=lambda s: s.ts)
@@ -176,7 +182,8 @@ EDGE_FOR_KIND = {"text": "IDENTICAL_POST", "neardup": "NEAR_DUP_POST", "forward"
 
 def run(g: Graph, time_window: int = 60, min_participation: int = 2, sync_seconds: int = 5,
         max_p: float | None = 1e-3, min_text_len: int = 40, simhash_max_dist: int = 3,
-        min_cluster_size: int = 3, same_day_min: int = 3, same_day_max: int = 50) -> dict:
+        min_cluster_size: int = 3, same_day_min: int = 3, same_day_max: int = 50,
+        max_object_accounts: int | None = 1000) -> dict:
     """Detect coordinated actor pairs and clusters and write them to ``g``.
 
     Parameters mirror :class:`tgo.config.CoordinationConfig`.  Returns counts.
@@ -184,7 +191,8 @@ def run(g: Graph, time_window: int = 60, min_participation: int = 2, sync_second
     params = dict(time_window=time_window, min_participation=min_participation, sync_seconds=sync_seconds,
                   object_types=sorted(EDGE_FOR_KIND), null_model="poisson", max_p=max_p)
     shares = build_shares(g, min_text_len=min_text_len)
-    pairs = detect_groups(shares, time_window, min_participation, simhash_max_dist=simhash_max_dist, max_p=max_p)
+    pairs = detect_groups(shares, time_window, min_participation, simhash_max_dist=simhash_max_dist, max_p=max_p,
+                          max_object_accounts=max_object_accounts)
     out = {"shares": len(shares), "pairs": len(pairs), "clusters": 0}
     with g.activity("DetectionRun", f"coortweet:w{time_window}:m{min_participation}", agent={
             "tool": "tgo-coortweet", "version": "0.1 (port of CooRTweet detect_groups)", "codeLicense": "MIT",

@@ -39,6 +39,7 @@ class CoordinationConfig:
     min_cluster_size: int = 3        # accounts needed for a CoordinationCluster node
     same_day_min: int = 3            # chats created on one day needed for SAME_CREATION_DATE edges
     same_day_max: int = 50           # ...and the upper bound (avoids cliques on bulk imports)
+    max_object_accounts: int = 1000  # objects shared by more accounts are dropped before pairing (fan-out cap, both engines)
 
 
 @dataclass
@@ -69,6 +70,7 @@ class IdentityConfig:
         "shared_avatar_hash": 0.35})     # evidence feature -> weight (non-biometric only)
     strong_identifiers: list[str] = field(default_factory=lambda: ["CryptoAddress", "IBAN", "PhoneNumber", "Email"])
     min_bio_len: int = 15            # shorter bios are too generic to count as shared evidence
+    max_evidence_accounts: int = 50  # evidence keys shared by more accounts are ignored (fan-out cap, both engines)
 
 
 @dataclass
@@ -104,9 +106,6 @@ class ScaleConfig:
     memory_limit: str | None = None  # DuckDB memory limit, e.g. "16GB" (spills to temp_directory beyond it)
     temp_directory: str | None = None  # DuckDB spill directory
     store_path: str | None = None    # DuckDB file (default <out>/tgo.duckdb)
-    max_object_accounts: int = 1000  # coordination: objects shared by more accounts are dropped (fan-out cap, logged)
-    max_evidence_accounts: int = 50  # identity: evidence keys shared by more accounts are ignored (fan-out cap)
-    neardup_k: int = 16              # (kept for compatibility; near-dup search is now exact range search)
     neardup_exact_limit: int = 2_000_000  # distinct fingerprints up to which near-dup search is exact (Faiss flat)
     exports: list[str] = field(default_factory=lambda: ["parquet", "neo4j", "ntriples"])  # bulk exports to write (n-triples is the slowest at 10M+)
     restrict_files: bool = True      # DuckDB may only touch input/out/db/temp dirs (external access off); network is always off
@@ -152,16 +151,37 @@ class Config:
         return cfg
 
     @classmethod
-    def load(cls, path: str | Path | None) -> "Config":
-        """Load a ``.json`` or ``.toml`` file (``None`` -> defaults)."""
-        if path is None:
-            return cls()
-        p = Path(path)
-        if p.suffix.lower() == ".toml":
-            import tomllib
+    def load(cls, path: str | Path | None = None, env: bool = True) -> "Config":
+        """Defaults <- ``.json``/``.toml`` file (optional) <- ``TGO_<SECTION>_<FIELD>`` environment variables.
 
-            return cls.from_dict(tomllib.loads(p.read_text(encoding="utf-8")))
-        return cls.from_dict(json.loads(p.read_text(encoding="utf-8")))
+        Env values are parsed as JSON when possible (``8``, ``true``, ``["a"]``) else used as strings,
+        e.g. ``TGO_SCALE_WORKERS=4``, ``TGO_SCALE_MEMORY_LIMIT=6GB`` (handy in containers).
+        """
+        data: dict = {}
+        if path is not None:
+            p = Path(path)
+            if p.suffix.lower() == ".toml":
+                import tomllib
+
+                data = tomllib.loads(p.read_text(encoding="utf-8"))
+            else:
+                data = json.loads(p.read_text(encoding="utf-8"))
+        if env:
+            import os
+
+            sections = {f.name for f in fields(cls)}
+            for k, v in os.environ.items():
+                if not k.startswith("TGO_"):
+                    continue
+                for sec in sections:
+                    prefix = f"TGO_{sec.upper()}_"
+                    if k.startswith(prefix):
+                        try:
+                            val = json.loads(v)
+                        except ValueError:
+                            val = v
+                        data.setdefault(sec, {})[k[len(prefix):].lower()] = val
+        return cls.from_dict(data)
 
     def to_dict(self) -> dict:
         """Nested plain-dict form (JSON-serialisable)."""
@@ -174,6 +194,7 @@ class Config:
 
 # Settings that are environment variables (read at import / call time, not via Config).
 ENVIRONMENT = {
+    "TGO_<SECTION>_<FIELD>": "override any Config field, e.g. TGO_SCALE_WORKERS=4 (applied by Config.load)",
     "TGO_DOMAIN": "namespace host for tg:/tgr: IRIs (default tgo.example.org)",
     "TGO_WHISPER_MODEL": "local faster-whisper (CTranslate2) model dir; enables real ASR",
     "TGO_OCR_MODELS": "local dir with RapidOCR det/cls/rec .onnx files; enables real OCR",

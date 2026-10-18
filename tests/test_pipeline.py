@@ -210,3 +210,42 @@ def test_coordination_null_model_rejects_popular_url_noise():
     tested = detect_groups(shares, 60, 2)
     assert any(a.startswith("acct") for pair in plain for a in pair)        # plain CooRTweet: false positives
     assert {a for pair in tested for a in pair} == {f"coord{j}" for j in range(5)}
+
+
+def test_fanout_caps_keep_pairing_linear():
+    """A viral object / stock evidence must not create O(n^2) pairs in the in-memory engine."""
+    from tgo.analysis.coordination import Share, detect_groups
+
+    viral = [Share("url:viral", "url", f"a{i}", f"m{i}", 1000 + i % 30) for i in range(3000)]
+    assert detect_groups(viral, 60, 1, max_p=None, max_object_accounts=1000) == {}
+    g = Graph()
+    for i in range(500):                           # 500 accounts sharing one stock avatar fingerprint
+        g.node(f"user:{i}", "HumanAccount")
+        g.node(f"photo:{i}", "Photo")
+        g.edge("HAS_AVATAR", f"user:{i}", f"photo:{i}")
+        g.edge("FINGERPRINT_OF", "fp:phash64:0", f"photo:{i}")
+    from tgo.analysis.identity import score_candidates
+
+    assert score_candidates(g, min_score=0.0, max_evidence_accounts=50) == []
+
+
+def test_near_pairs_groups_identical_hashes():
+    from tgo.extractors import PHash, near_pairs
+
+    hs = {f"m{i}": PHash("phash64", "00000000000000ff", 64, None, 10) for i in range(2000)}  # one meme x2000
+    hs["other"] = PHash("phash64", "00000000000000fe", 64, None, 10)                         # 1 bit away
+    pairs = list(near_pairs(hs))
+    assert len(pairs) == 2000 and all("other" in p for p in pairs)   # no 2000^2 identical-hash pairs
+
+
+def test_config_env_overrides(monkeypatch):
+    from tgo.config import Config
+
+    monkeypatch.setenv("TGO_SCALE_WORKERS", "3")
+    monkeypatch.setenv("TGO_SCALE_MEMORY_LIMIT", "6GB")
+    monkeypatch.setenv("TGO_COORDINATION_TIME_WINDOW", "120")
+    c = Config.load()
+    assert (c.scale.workers, c.scale.memory_limit, c.coordination.time_window) == (3, "6GB", 120)
+    monkeypatch.setenv("TGO_SCALE_NOT_A_FIELD", "1")
+    with pytest.raises(ValueError):
+        Config.load()

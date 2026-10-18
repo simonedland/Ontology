@@ -1,0 +1,16 @@
+{
+  "_comment": "Pinned third-party browser assets inlined into offline reports. Verified by tests/test_vendor.py; upgrade with scripts/vendor_fetch.py (online, explicit).",
+  "files": [
+    {
+      "name": "cytoscape",
+      "version": "3.30.4",
+      "license": "MIT",
+      "license_file": "LICENSE-cytoscape.txt",
+      "tarball": "https://registry.npmjs.org/cytoscape/-/cytoscape-3.30.4.tgz",
+      "integrity": "sha512-OxtlZwQl1WbwMmLiyPSEBuzeTIQnwZhJYYWFzZ2PhEHVFwpeaqNIkUzSiso00D98qk60l8Gwon2RP304d3BJ1A==",
+      "member": "package/dist/cytoscape.min.js",
+      "file": "cytoscape.min.js",
+      "sha256": "1bb5340e549511e111b31e5684872c949ad33d40ea5dba0ad8e7d90c62c7b3b9"
+    }
+  ]
+}

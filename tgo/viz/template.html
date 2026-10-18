@@ -1,0 +1,691 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --surface-2: #f3f2ee; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,0.10);
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7; --s8: #e34948;
+  --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+  --seq-1: #cde2fb; --seq-2: #9ec5f4; --seq-3: #6da7ec; --seq-4: #3987e5; --seq-5: #256abf; --seq-6: #184f95; --seq-7: #0d366b;
+  --accent: #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --surface-2: #242422; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+    --seq-1: #0d366b; --seq-2: #104281; --seq-3: #184f95; --seq-4: #1c5cab; --seq-5: #2a78d6; --seq-6: #5598e7; --seq-7: #9ec5f4;
+    --accent: #3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --surface-2: #242422; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+  --seq-1: #0d366b; --seq-2: #104281; --seq-3: #184f95; --seq-4: #1c5cab; --seq-5: #2a78d6; --seq-6: #5598e7; --seq-7: #9ec5f4;
+  --accent: #3987e5;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--page); color: var(--ink); font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 12px 16px; border-bottom: 1px solid var(--grid); background: var(--surface); }
+header h1 { font-size: 16px; margin: 0; font-weight: 650; }
+header .sub { color: var(--ink-2); font-size: 12px; }
+.tiles { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.tile { background: var(--surface-2); border-radius: 8px; padding: 6px 12px; min-width: 92px; }
+.tile .v { font-size: 18px; font-weight: 650; }
+.tile .k { color: var(--ink-2); font-size: 11px; }
+nav { display: flex; gap: 2px; padding: 0 16px; background: var(--surface); border-bottom: 1px solid var(--grid); overflow-x: auto; }
+nav button { border: 0; background: none; color: var(--ink-2); padding: 10px 12px; font: inherit; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
+nav button.on { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+nav .spacer { flex: 1; }
+main > section { display: none; }
+main > section.on { display: block; }
+#graph.on { display: grid; grid-template-columns: 250px 1fr 360px; height: calc(100vh - 106px); min-height: 520px; }
+@media (max-width: 1100px) { #graph.on { grid-template-columns: 1fr; height: auto; } #cy { height: 70vh; } }
+aside { overflow: auto; padding: 12px; background: var(--surface); }
+aside.left { border-right: 1px solid var(--grid); }
+aside.right { border-left: 1px solid var(--grid); }
+#cy { position: relative; background: var(--surface); min-height: 420px; }
+h2 { font-size: 13px; margin: 14px 0 6px; font-weight: 650; }
+h2:first-child { margin-top: 0; }
+h3 { font-size: 12px; margin: 12px 0 4px; color: var(--ink-2); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+label.chk { display: flex; align-items: center; gap: 6px; padding: 2px 0; cursor: pointer; }
+.sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; flex: none; }
+.swl { display: inline-block; width: 22px; height: 0; border-top: 2px solid var(--ink-2); flex: none; }
+.btnrow { display: flex; flex-wrap: wrap; gap: 4px; }
+button.b { border: 1px solid var(--grid); background: var(--surface-2); color: var(--ink); border-radius: 6px; padding: 4px 8px; font: inherit; cursor: pointer; }
+button.b.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+input[type=range] { width: 100%; }
+input[type=search] { width: 100%; padding: 5px 8px; border: 1px solid var(--grid); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; }
+.muted { color: var(--muted); }
+.small { font-size: 11px; }
+.mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 11.5px; word-break: break-all; }
+.chip { display: inline-block; padding: 1px 7px; border-radius: 10px; background: var(--surface-2); margin: 1px 2px 1px 0; font-size: 11px; border: 1px solid var(--ring); }
+.chip.click { cursor: pointer; }
+.chip.click:hover { border-color: var(--accent); }
+.badge { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; border: 1px solid var(--ring); }
+.st-observed { background: var(--surface-2); }
+.st-inferred { background: transparent; border-style: dashed; border-color: var(--ink-2); }
+.st-file_declared { background: transparent; border-style: dotted; border-color: var(--ink-2); }
+.st-analyst { background: var(--surface-2); border-color: var(--accent); }
+table.kv, table.t { border-collapse: collapse; width: 100%; }
+table.kv td { padding: 2px 4px; vertical-align: top; border-bottom: 1px solid var(--grid); }
+table.kv td:first-child { color: var(--ink-2); width: 38%; white-space: nowrap; }
+table.t th, table.t td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+table.t th { color: var(--ink-2); font-weight: 600; font-size: 11.5px; position: sticky; top: 0; background: var(--surface); }
+table.t td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.card { background: var(--surface); border: 1px solid var(--grid); border-radius: 10px; padding: 12px; }
+.ev { border: 1px solid var(--grid); border-radius: 8px; padding: 6px 8px; margin: 4px 0; cursor: pointer; background: var(--surface); }
+.ev:hover { border-color: var(--accent); }
+.page { padding: 16px; max-width: 1400px; margin: 0 auto; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.thumb { width: 100%; max-height: 180px; object-fit: contain; background: var(--surface-2); border-radius: 6px; cursor: pointer; transition: filter .15s; }
+.thumb.blur { filter: blur(7px); }
+.hm { border-collapse: separate; border-spacing: 2px; }
+.hm td.cell { width: 30px; height: 22px; border-radius: 3px; cursor: pointer; }
+.hm td.cell.none { background: var(--surface-2); }
+.hm th { font-weight: 500; color: var(--ink-2); font-size: 11px; text-align: right; padding-right: 6px; white-space: nowrap; }
+.hm th.col { text-align: center; padding: 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: 11.5px; color: var(--ink-2); }
+.bar { height: 8px; border-radius: 4px; background: var(--s1); }
+.bartrack { background: var(--surface-2); border-radius: 4px; width: 100%; }
+#tip { position: fixed; pointer-events: none; background: var(--ink); color: var(--surface); padding: 6px 8px; border-radius: 6px; font-size: 11.5px; max-width: 340px; z-index: 50; display: none; }
+.sev-violation { color: var(--critical); font-weight: 700; }
+.sev-warning { color: var(--serious); font-weight: 700; }
+.sev-info { color: var(--ink-2); font-weight: 700; }
+.wave { display: block; width: 100%; height: 40px; }
+.seg { display: grid; grid-template-columns: auto 1fr; gap: 8px; padding: 3px 0; border-bottom: 1px solid var(--grid); font-size: 12px; overflow-wrap: anywhere; }
+.card { overflow-wrap: anywhere; }
+.note { background: var(--surface-2); border-radius: 8px; padding: 8px 10px; color: var(--ink-2); font-size: 12px; }
+.cyctl { position: absolute; right: 10px; top: 10px; z-index: 5; display: flex; gap: 4px; }
+.empty { color: var(--muted); padding: 20px 0; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>__TITLE__</h1>
+    <div class="sub">Telegram Graph Ontology (TGO): observed / file-declared / inferred facts kept apart. An account is never a person.</div>
+  </div>
+  <div class="tiles" id="tiles"></div>
+</header>
+<nav id="tabs">
+  <button data-tab="graph" class="on">Graph</button>
+  <button data-tab="coord">Coordination</button>
+  <button data-tab="identity">Identity</button>
+  <button data-tab="media">Media &amp; extraction</button>
+  <button data-tab="coverage">Guardrails &amp; coverage</button>
+  <button data-tab="onto">Ontology</button>
+  <span class="spacer"></span>
+  <button id="themeBtn" title="Toggle light/dark">◐ Theme</button>
+</nav>
+<main>
+  <section id="graph" class="on">
+    <aside class="left">
+      <h2>View</h2>
+      <div class="btnrow" id="views"></div>
+      <h3>Search</h3>
+      <input type="search" id="search" placeholder="name, @handle, wallet, key…">
+      <div id="searchRes" class="small"></div>
+      <h3>Node families</h3>
+      <div id="famList"></div>
+      <h3>Edge groups (hue)</h3>
+      <div id="grpList"></div>
+      <h3>Epistemic status (line style)</h3>
+      <div id="stList"></div>
+      <h3>Min confidence <span id="confV" class="muted"></span></h3>
+      <input type="range" id="conf" min="0" max="1" step="0.05" value="0">
+      <div class="legend small"><span>opacity: ≥0.9 · ≥0.7 · ≥0.5 · &lt;0.5</span></div>
+      <h3>Time window</h3>
+      <input type="range" id="t0" min="0" max="1000" value="0">
+      <input type="range" id="t1" min="0" max="1000" value="1000">
+      <div id="tV" class="small muted"></div>
+      <h3>Options</h3>
+      <label class="chk"><input type="checkbox" id="hideIso" checked> hide isolated nodes</label>
+      <label class="chk"><input type="checkbox" id="showProv"> show provenance edges</label>
+      <p class="small muted">Click a node or edge for evidence. Double-click a node to expand its neighbours.</p>
+    </aside>
+    <div id="cy"><div class="cyctl"><button class="b" id="relayout">Re-layout</button><button class="b" id="fit">Fit</button></div></div>
+    <aside class="right" id="details"><p class="muted">Select a node or edge to see its properties, provenance and evidence.</p></aside>
+  </section>
+  <section id="coord"><div class="page" id="coordPage"></div></section>
+  <section id="identity"><div class="page" id="identityPage"></div></section>
+  <section id="media"><div class="page" id="mediaPage"></div></section>
+  <section id="coverage"><div class="page" id="coveragePage"></div></section>
+  <section id="onto"><div class="page" id="ontoPage"></div></section>
+</main>
+<div id="tip"></div>
+<script id="tgo-data" type="application/json">__TGO_DATA__</script>
+<script>/*__CYTOSCAPE__*/</script>
+<script>
+"use strict";
+const D = JSON.parse(document.getElementById("tgo-data").textContent);
+const byKey = new Map(D.nodes.map(n => [n.id, n]));
+const byEdge = new Map(D.edges.map(e => [e.id, e]));
+const outE = new Map(), inE = new Map();
+for (const e of D.edges) {
+  (outE.get(e.source) || outE.set(e.source, []).get(e.source)).push(e);
+  (inE.get(e.target) || inE.set(e.target, []).get(e.target)).push(e);
+}
+const $ = s => document.querySelector(s);
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k === "style") el.style.cssText = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat(Infinity)) {
+    if (kid == null || kid === false) continue;
+    el.append(kid instanceof Node ? kid : String(kid));
+  }
+  return el;
+}
+const css = v => getComputedStyle(document.documentElement).getPropertyValue("--" + v).trim() || "#888";
+const fmtT = t => t ? new Date(t * 1000).toISOString().replace("T", " ").slice(0, 19) + "Z" : "";
+const fmtV = v => {
+  if (v == null) return "";
+  if (typeof v === "object") return JSON.stringify(v);
+  if (typeof v === "number" && v > 1e9 && v < 4e9) return v + "  (" + fmtT(v) + ")";
+  return String(v);
+};
+const tip = $("#tip");
+function showTip(ev, lines) { tip.replaceChildren(...lines.map(l => h("div", {}, l))); tip.style.display = "block";
+  tip.style.left = Math.min(ev.clientX + 14, innerWidth - 350) + "px"; tip.style.top = (ev.clientY + 14) + "px"; }
+function hideTip() { tip.style.display = "none"; }
+function statusBadge(s) { return h("span", { class: "badge st-" + s, title: "epistemic status" }, s.replace("_", "-")); }
+
+// ------------------------------------------------------------------ theme
+const themeKey = "tgo-theme";
+try { const t = localStorage.getItem(themeKey); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+$("#themeBtn").onclick = () => {
+  const dark = document.documentElement.dataset.theme
+    ? document.documentElement.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.dataset.theme = dark ? "light" : "dark";
+  try { localStorage.setItem(themeKey, document.documentElement.dataset.theme); } catch (e) {}
+  restyle(); renderCoord();
+};
+
+// ------------------------------------------------------------------ tiles
+(function tiles() {
+  const r = D.report, st = r.stats || {}, es = st.edge_status || {};
+  const total = Object.values(es).reduce((a, b) => a + b, 0) || 1;
+  const nGroups = D.nodes.filter(n => n.labels.includes("InferredGroup")).length;
+  const nCand = D.edges.filter(e => e.type === "CANDIDATE_SAME_PERSON").length;
+  const v = r.validation || {};
+  const items = [["Nodes", st.nodes], ["Edges", st.edges], ["Inferred edges", Math.round(100 * (es.inferred || 0) / total) + "%"],
+    ["Inferred groups", nGroups], ["Identity candidates", nCand], ["Violations", v.violation ?? "–"], ["Warnings", v.warning ?? "–"]];
+  if (D.omitted && D.omitted.nodes > 0) items.push(["Omitted from viewer", D.omitted.nodes]);
+  $("#tiles").replaceChildren(...items.map(([k, val]) => h("div", { class: "tile" }, h("div", { class: "v" }, val), h("div", { class: "k" }, k))));
+})();
+
+// ------------------------------------------------------------------ tabs
+document.querySelectorAll("#tabs button[data-tab]").forEach(b => b.onclick = () => showTab(b.dataset.tab));
+function showTab(t) {
+  document.querySelectorAll("#tabs button[data-tab]").forEach(x => x.classList.toggle("on", x.dataset.tab === t));
+  document.querySelectorAll("main > section").forEach(s => s.classList.toggle("on", s.id === t));
+  if (t === "graph" && cy) { cy.resize(); }
+}
+
+// ------------------------------------------------------------------ graph
+const VIEWS = D.views;
+const state = { fams: new Set(), groups: new Set(), status: new Set(["observed", "inferred", "file_declared", "analyst"]),
+  minConf: 0, t0: 0, t1: 1000, forced: new Set(), view: "Actors" };
+const famCount = {}; D.nodes.forEach(n => famCount[n.fam] = (famCount[n.fam] || 0) + 1);
+const grpCount = {}; D.edges.forEach(e => grpCount[e.group] = (grpCount[e.group] || 0) + 1);
+const stCount = {}; D.edges.forEach(e => stCount[e.status] = (stCount[e.status] || 0) + 1);
+const ts = D.edges.flatMap(e => [e.t, e.t2]).filter(Boolean).sort((a, b) => a - b);
+const T_MIN = ts[0] || 0, T_MAX = ts[ts.length - 1] || 1;
+const tAt = v => T_MIN + (T_MAX - T_MIN) * v / 1000;
+
+function buildFilters() {
+  $("#views").replaceChildren(...Object.keys(VIEWS).map(v => h("button", { class: "b" + (state.view === v ? " on" : ""), onclick: () => setView(v) }, v)));
+  $("#famList").replaceChildren(...Object.entries(D.families).filter(([k]) => famCount[k]).map(([k, f]) =>
+    h("label", { class: "chk" }, h("input", { type: "checkbox", checked: state.fams.has(k), onchange: e => { e.target.checked ? state.fams.add(k) : state.fams.delete(k); apply(); } }),
+      h("span", { class: "sw", style: `background:${css(f.color)};border-radius:${f.shape === "ellipse" ? "50%" : "3px"}` }), f.name, h("span", { class: "muted small" }, " " + famCount[k]))));
+  $("#grpList").replaceChildren(...Object.entries(D.edgeGroups).filter(([k]) => grpCount[k] && k !== "provenance").map(([k, g]) =>
+    h("label", { class: "chk", title: g.types.join(", ") }, h("input", { type: "checkbox", checked: state.groups.has(k), onchange: e => { e.target.checked ? state.groups.add(k) : state.groups.delete(k); apply(); } }),
+      h("span", { class: "swl", style: `border-top-color:${css(g.color)};border-top-width:3px` }), g.name, h("span", { class: "muted small" }, " " + grpCount[k]))));
+  const stDesc = { observed: ["solid", "platform metadata / read as-is"], inferred: ["dashed", "ML, heuristics, every person link"],
+    file_declared: ["dotted", "XMP/docProps: forgeable"], analyst: ["solid", "human judgement"] };
+  $("#stList").replaceChildren(...Object.keys(stDesc).filter(s => stCount[s]).map(s =>
+    h("label", { class: "chk", title: stDesc[s][1] }, h("input", { type: "checkbox", checked: state.status.has(s), onchange: e => { e.target.checked ? state.status.add(s) : state.status.delete(s); apply(); } }),
+      h("span", { class: "swl", style: `border-top-style:${stDesc[s][0]}` }), s.replace("_", "-"), h("span", { class: "muted small" }, " " + stCount[s]))));
+}
+function setView(v) {
+  state.view = v; state.fams = new Set(VIEWS[v].fams); state.groups = new Set(VIEWS[v].groups); state.forced.clear();
+  buildFilters(); apply(true);
+}
+
+let cy = null;
+function nodeColor(n) { return css(D.families[n.fam]?.color || "muted"); }
+function initCy() {
+  cy = cytoscape({
+    container: $("#cy"), wheelSensitivity: 0.25, minZoom: 0.05, maxZoom: 4, textureOnViewport: true, hideEdgesOnViewport: false, pixelRatio: 1,
+    elements: [
+      ...D.nodes.map(n => ({ group: "nodes", data: { id: n.id, label: n.label, shape: n.shape, size: n.size, color: nodeColor(n), img: n.thumb && n.fam === "Media" ? n.thumb : undefined }, position: { x: n.x || 0, y: n.y || 0 } })),
+      ...D.edges.map(e => ({ group: "edges", data: { id: e.id, source: e.source, target: e.target, color: css(e.color), style: e.style, opacity: e.opacity, width: e.width, arrow: e.arrow, type: e.type } })),
+    ],
+    style: [
+      { selector: "node", style: { "background-color": "data(color)", shape: "data(shape)", width: "data(size)", height: "data(size)", label: "data(label)",
+        "font-size": 9, color: css("ink-2"), "text-valign": "bottom", "text-margin-y": 3, "min-zoomed-font-size": 7, "text-max-width": 120, "text-wrap": "ellipsis",
+        "border-width": 1.5, "border-color": css("surface") } },
+      { selector: "node[img]", style: { "background-image": "data(img)", "background-fit": "cover", "background-image-opacity": 0.85 } },
+      { selector: "edge", style: { "line-color": "data(color)", "target-arrow-color": "data(color)", "line-style": "data(style)", opacity: "data(opacity)", width: "data(width)",
+        "target-arrow-shape": "data(arrow)", "arrow-scale": 0.7, "curve-style": "bezier", "line-dash-pattern": [6, 4] } },
+      { selector: ".hid", style: { display: "none" } },
+      { selector: ":selected", style: { "border-color": css("accent"), "border-width": 3, "line-color": css("accent"), "target-arrow-color": css("accent"), opacity: 1 } },
+      { selector: ".hl", style: { "border-color": css("accent"), "border-width": 3 } },
+    ],
+    layout: { name: "preset" },
+  });
+  cy.on("tap", "node", ev => showNode(ev.target.id()));
+  cy.on("tap", "edge", ev => showEdge(ev.target.id()));
+  cy.on("dbltap", "node", ev => expand(ev.target.id()));
+  cy.on("mouseover", "node", ev => { const n = byKey.get(ev.target.id()); showTip(ev.originalEvent, [n.label, D.families[n.fam]?.name + " · " + n.labels.filter(l => l !== n.fam).slice(0, 3).join(", "), n.deg + " edges"]); });
+  cy.on("mouseover", "edge", ev => { const e = byEdge.get(ev.target.id()); showTip(ev.originalEvent, [e.type, `${e.status} · conf ${e.conf.toFixed(2)} · ×${e.props.count || 1}`, (byKey.get(e.source)?.label || e.source) + " → " + (byKey.get(e.target)?.label || e.target)]); });
+  cy.on("mouseout", hideTip);
+  $("#relayout").onclick = () => relayout();
+  $("#fit").onclick = () => cy.fit(cy.elements(":visible"), 30);
+}
+function restyle() {
+  if (!cy) return;
+  cy.batch(() => {
+    cy.nodes().forEach(n => n.data("color", nodeColor(byKey.get(n.id()))));
+    cy.edges().forEach(e => e.data("color", css(byEdge.get(e.id()).color)));
+  });
+  cy.style().selector("node").style({ color: css("ink-2"), "border-color": css("surface") })
+    .selector(":selected").style({ "border-color": css("accent"), "line-color": css("accent"), "target-arrow-color": css("accent") }).update();
+  buildFilters();
+}
+function edgeVisible(e) {
+  if (e.group === "provenance" && !$("#showProv").checked) return false;
+  if (e.group !== "provenance" && !state.groups.has(e.group)) return false;
+  if (!state.status.has(e.status) || e.conf < state.minConf) return false;
+  const a = tAt(state.t0), b = tAt(state.t1);
+  if (e.t && (e.t2 || e.t) < a) return false;
+  if (e.t && e.t > b) return false;
+  return true;
+}
+function apply(layout) {
+  if (!cy) return;
+  const visN = new Set(D.nodes.filter(n => state.fams.has(n.fam) || state.forced.has(n.id)).map(n => n.id));
+  const visE = D.edges.filter(e => visN.has(e.source) && visN.has(e.target) && edgeVisible(e));
+  const touched = new Set(); visE.forEach(e => { touched.add(e.source); touched.add(e.target); });
+  const hideIso = $("#hideIso").checked;
+  const ve = new Set(visE.map(e => e.id));
+  cy.batch(() => {
+    cy.nodes().forEach(n => { const ok = visN.has(n.id()) && (!hideIso || touched.has(n.id()) || state.forced.has(n.id())); n.toggleClass("hid", !ok); });
+    cy.edges().forEach(e => e.toggleClass("hid", !ve.has(e.id())));
+  });
+  $("#confV").textContent = "≥ " + state.minConf.toFixed(2);
+  $("#tV").textContent = fmtT(tAt(state.t0)).slice(0, 16) + " → " + fmtT(tAt(state.t1)).slice(0, 16);
+  if (layout) presetLayout();
+}
+function presetLayout() {
+  const P = (D.viewPos || {})[state.view];
+  if (!P) return relayout();
+  cy.batch(() => cy.nodes(":visible").forEach(n => {
+    let p = P[n.id()];
+    if (!p) {  // forced/expanded node: place next to a positioned neighbour
+      const nb = n.neighborhood("node").filter(m => P[m.id()]);
+      p = nb.length ? [P[nb[0].id()][0] + 40 * Math.random() - 20, P[nb[0].id()][1] + 40 * Math.random() - 20] : [0, 0];
+    }
+    n.position({ x: p[0], y: p[1] });
+  }));
+  cy.fit(cy.elements(":visible"), 30);
+}
+function relayout() {
+  const els = cy.elements(":visible");
+  els.layout({ name: "cose", animate: false, randomize: false, nodeRepulsion: () => 60000, idealEdgeLength: e => (byEdge.get(e.id())?.group === "coordination" ? 140 : 90), edgeElasticity: () => 60,
+    nodeOverlap: 20, gravity: 0.35, numIter: 2000, componentSpacing: 60, nodeDimensionsIncludeLabels: false, fit: true, padding: 30 }).run();
+}
+function expand(id) {
+  for (const e of [...(outE.get(id) || []), ...(inE.get(id) || [])]) {
+    if (e.group === "provenance") continue;
+    state.forced.add(e.source); state.forced.add(e.target);
+    state.groups.add(e.group);
+  }
+  buildFilters(); apply(false);
+  const n = cy.getElementById(id);
+  cy.elements(":visible").layout({ name: "cose", animate: false, randomize: false, fit: false, numIter: 600, nodeRepulsion: () => 9000, idealEdgeLength: () => 70 }).run();
+  cy.animate({ center: { eles: n }, duration: 250 });
+}
+function focusNode(id) {
+  showTab("graph");
+  const n = byKey.get(id);
+  if (!n) return;
+  if (!state.fams.has(n.fam)) state.forced.add(id);
+  apply(false);
+  const el = cy.getElementById(id);
+  cy.elements().unselect(); el.select();
+  cy.animate({ center: { eles: el }, zoom: Math.max(cy.zoom(), 1.1), duration: 300 });
+  showNode(id);
+}
+function focusEdge(id) {
+  showTab("graph");
+  const e = byEdge.get(id); if (!e) return;
+  state.forced.add(e.source); state.forced.add(e.target); state.groups.add(e.group); state.status.add(e.status);
+  buildFilters(); apply(false);
+  const el = cy.getElementById(id); cy.elements().unselect(); el.select();
+  cy.animate({ fit: { eles: el.connectedNodes(), padding: 120 }, duration: 300 });
+  showEdge(id);
+}
+$("#conf").oninput = e => { state.minConf = +e.target.value; apply(); };
+$("#t0").oninput = e => { state.t0 = Math.min(+e.target.value, state.t1); apply(); };
+$("#t1").oninput = e => { state.t1 = Math.max(+e.target.value, state.t0); apply(); };
+$("#hideIso").onchange = () => apply();
+$("#showProv").onchange = () => apply();
+$("#search").oninput = e => {
+  const q = e.target.value.trim().toLowerCase();
+  if (q.length < 2) { $("#searchRes").replaceChildren(); return; }
+  const hits = D.nodes.filter(n => n.id.toLowerCase().includes(q) || n.label.toLowerCase().includes(q) ||
+    String(n.props.value || "").toLowerCase().includes(q) || String(n.props.text || "").toLowerCase().includes(q)).slice(0, 12);
+  $("#searchRes").replaceChildren(...hits.map(n => h("div", { class: "ev", onclick: () => focusNode(n.id) }, h("b", {}, n.label), " ", h("span", { class: "muted" }, D.families[n.fam]?.name))));
+};
+
+// ------------------------------------------------------------- details
+function kvTable(obj, skip) {
+  const rows = Object.entries(obj).filter(([k, v]) => !(skip || []).includes(k) && v !== null && v !== "" && !(Array.isArray(v) && !v.length));
+  return h("table", { class: "kv" }, rows.map(([k, v]) => h("tr", {}, h("td", {}, k), h("td", { class: typeof v === "string" && v.length > 40 ? "mono" : "" }, fmtV(v)))));
+}
+function evidenceItem(ev) {
+  const n = byKey.get(ev);
+  if (n) {
+    const txt = n.props.text ? String(n.props.text).slice(0, 160) : "";
+    const t = n.props.date || n.t;
+    return h("div", { class: "ev", onclick: () => focusNode(n.id) },
+      h("div", {}, h("b", {}, D.families[n.fam]?.name || n.fam), " · ", n.label),
+      t ? h("div", { class: "small muted" }, fmtT(t)) : null, txt ? h("div", { class: "small" }, txt) : null);
+  }
+  const e = byEdge.get(ev);
+  if (e) return h("div", { class: "ev", onclick: () => focusEdge(e.id) }, h("b", {}, e.type), " ", h("span", { class: "small mono" }, e.id));
+  return h("div", { class: "ev mono" }, ev);
+}
+function runBlock(rk) {
+  const r = D.runs.find(x => x.key === rk);
+  if (!r) return h("div", { class: "mono small" }, rk);
+  const a = r.agent || {};
+  return h("div", { class: "card", style: "margin:4px 0;padding:8px" },
+    h("div", {}, h("b", {}, r.kind), " ", h("span", { class: "mono" }, rk.replace(/^run:/, ""))),
+    h("div", { class: "small" }, "agent: ", h("b", {}, (a.tool || "?") + " " + (a.version || "")), a.modelId ? " · model " + a.modelId : "",
+      " · code ", a.codeLicense || "?", " · weights ", a.weightsLicense || "n/a"),
+    r.props.parameters ? h("details", {}, h("summary", { class: "small" }, "parameters"), h("pre", { class: "mono small", style: "white-space:pre-wrap" }, JSON.stringify(JSON.parse(r.props.parameters), null, 1))) : null);
+}
+function waveform(samples) {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", `0 0 ${samples.length * 3} 40`); svg.setAttribute("class", "wave"); svg.setAttribute("preserveAspectRatio", "none");
+  samples.forEach((s, i) => { const r = document.createElementNS(ns, "rect"); const hgt = Math.max(2, s * 36);
+    r.setAttribute("x", i * 3); r.setAttribute("y", 20 - hgt / 2); r.setAttribute("width", 2); r.setAttribute("height", hgt); r.setAttribute("rx", 1);
+    r.setAttribute("fill", css("s3")); svg.append(r); });
+  return h("div", {}, h("div", { class: "small muted" }, "Telegram waveform (5-bit packed, decoded; no audio download needed)"), svg);
+}
+function transcriptBlock(mediaKey) {
+  const te = (outE.get(mediaKey) || []).find(e => e.type === "HAS_TRANSCRIPT");
+  if (!te) return null;
+  const tr = byKey.get(te.target);
+  const segs = (outE.get(tr.id) || []).filter(e => e.type === "HAS_SEGMENT").map(e => byKey.get(e.target)).sort((a, b) => a.props.startSec - b.props.startSec);
+  return h("div", {}, h("h3", {}, "Transcript ", statusBadge("inferred")),
+    h("div", { class: "small muted" }, `language ${tr.props.detectedLanguage} (p=${tr.props.languageProbability}) · `, "turn labels are per-recording only (no speaker matching)"),
+    segs.map(s => h("div", { class: "seg" }, h("span", { class: "mono muted" }, `${(+s.props.startSec).toFixed(1)}–${(+s.props.endSec).toFixed(1)}s`), h("span", {}, s.props.text))));
+}
+function thumbImg(src, blur) {
+  const img = h("img", { src, class: "thumb" + (blur ? " blur" : ""), alt: "media thumbnail", title: blur ? "blurred by default: click to reveal" : "" });
+  img.onclick = () => img.classList.toggle("blur");
+  return img;
+}
+function classChips(n) {
+  return n.labels.map(l => { const c = D.classes.find(x => x.name === l);
+    return h("span", { class: "chip", title: c ? `${c.layer} layer · ${c.epistemic}${c.align.length ? " · ≡ " + c.align.join(", ") : ""}${c.doc ? "\n" + c.doc : ""}` : "" }, "tg:" + l); });
+}
+function showNode(id) {
+  const n = byKey.get(id); if (!n) return;
+  const out = outE.get(id) || [], inn = inE.get(id) || [];
+  const byType = {};
+  for (const e of [...out, ...inn]) (byType[e.type] = byType[e.type] || []).push(e);
+  const gaps = Object.entries(n.fields || {}).filter(([, r]) => r.visibility !== "visible");
+  const vis = Object.entries(n.fields || {});
+  const isAvatar = inn.some(e => e.type === "HAS_AVATAR");
+  $("#details").replaceChildren(
+    h("h2", {}, n.label), h("div", { class: "mono small muted" }, n.id),
+    h("div", { style: "margin:6px 0" }, classChips(n)),
+    n.thumb ? thumbImg(n.thumb, isAvatar) : null,
+    n.props.waveform ? waveform(n.props.waveform) : null,
+    n.props.text && n.fam !== "Message" ? h("div", { class: "note", style: "margin:6px 0;white-space:pre-wrap;max-height:180px;overflow:auto" }, String(n.props.text).slice(0, 2000)) : null,
+    n.fam === "Message" && n.props.text ? h("div", { class: "note", style: "margin:6px 0" }, n.props.text) : null,
+    transcriptBlock(id),
+    h("h3", {}, "Properties"), kvTable(n.props, ["label", "waveform", "text", "members"]),
+    n.props.declaredBySender ? h("p", { class: "small muted" }, "Sender-declared attributes (not measured): ", n.props.declaredBySender.join(", ")) : null,
+    vis.length ? h("div", {}, h("h3", {}, "Field visibility (absence is data)"),
+      h("table", { class: "kv" }, vis.map(([f, r]) => h("tr", {}, h("td", {}, f), h("td", {}, h("span", { class: "chip" }, r.visibility), h("span", { class: "small muted" }, " " + r.source)))))) : null,
+    n.sources.length ? h("div", {}, h("h3", {}, "Collected / generated by"), n.sources.map(runBlock)) : null,
+    h("h3", {}, "Relationships"),
+    Object.entries(byType).sort((a, b) => b[1].length - a[1].length).map(([t, es]) => h("details", {},
+      h("summary", {}, t, h("span", { class: "muted" }, " " + es.length)),
+      es.slice(0, 40).map(e => { const other = e.source === id ? e.target : e.source; const o = byKey.get(other);
+        return h("div", { class: "ev small", onclick: () => focusEdge(e.id) }, e.source === id ? "→ " : "← ", o?.label || other, " ", statusBadge(e.status), " ", e.conf < 1 ? e.conf.toFixed(2) : ""); }))),
+    h("div", { style: "margin-top:10px" }, h("button", { class: "b", onclick: () => expand(id) }, "Expand neighbours")),
+  );
+}
+function showEdge(id) {
+  const e = byEdge.get(id); if (!e) return;
+  const rel = D.relations.find(r => r.name === e.type);
+  const p = e.props;
+  $("#details").replaceChildren(
+    h("h2", {}, e.type, " ", statusBadge(e.status)),
+    rel ? h("div", { class: "small muted" }, `tier: ${rel.tier}${rel.doc ? " · " + rel.doc : ""}${rel.ftm ? " · FtM " + rel.ftm : ""}`) : null,
+    h("div", { class: "ev", onclick: () => focusNode(e.source) }, h("b", {}, byKey.get(e.source)?.label || e.source), h("div", { class: "small muted" }, e.source)),
+    h("div", { class: "small muted", style: "text-align:center" }, "↓"),
+    h("div", { class: "ev", onclick: () => focusNode(e.target) }, h("b", {}, byKey.get(e.target)?.label || e.target), h("div", { class: "small muted" }, e.target)),
+    h("h3", {}, "Why this edge exists"),
+    h("table", { class: "kv" },
+      h("tr", {}, h("td", {}, "confidence"), h("td", {}, h("div", { class: "bartrack" }, h("div", { class: "bar", style: `width:${Math.round(e.conf * 100)}%` })), e.conf.toFixed(3))),
+      h("tr", {}, h("td", {}, "method"), h("td", {}, p.method || "")),
+      h("tr", {}, h("td", {}, "events"), h("td", {}, p.count || 1)),
+      p.scope ? h("tr", {}, h("td", {}, "visibility scope"), h("td", {}, p.scope, p.sensitivity ? h("span", { class: "sev-warning" }, " · elevated sensitivity") : "")) : null,
+      p.observed_by ? h("tr", {}, h("td", {}, "observed by"), h("td", {}, byKey.get(p.observed_by)?.label || p.observed_by)) : null,
+      p.t_first ? h("tr", {}, h("td", {}, "time"), h("td", {}, fmtT(p.t_first), p.t_last && p.t_last !== p.t_first ? " → " + fmtT(p.t_last) : "")) : null),
+    h("h3", {}, "Other properties"), kvTable(p, ["conf", "method", "count", "scope", "observed_by", "t_first", "t_last", "evidence", "runs", "sensitivity"]),
+    (p.evidence || []).length ? h("div", {}, h("h3", {}, `Evidence (${p.evidence.length})`), p.evidence.slice(0, 25).map(evidenceItem)) : null,
+    (p.runs || []).length ? h("div", {}, h("h3", {}, "Provenance"), p.runs.map(runBlock)) : null,
+  );
+}
+
+// ------------------------------------------------------------- coordination
+function renderCoord() {
+  const page = $("#coordPage");
+  const groups = D.nodes.filter(n => n.labels.includes("InferredGroup"));
+  const kids = [h("h2", {}, "Inferred groups"), h("p", { class: "small muted" },
+    "Algorithmic groups are inferred: each carries its detection run, parameters and a quality or stability score. Promote to an analyst case only after review.")];
+  kids.push(h("div", { class: "grid2" }, groups.map(g => {
+    const mem = (inE.get(g.id) || []).filter(e => e.type === "IN_CLUSTER");
+    return h("div", { class: "card" },
+      h("div", {}, h("b", {}, g.label), " ", statusBadge("inferred"), " ", h("span", { class: "chip" }, g.labels.includes("CoordinationCluster") ? "CooRTweet" : "Louvain")),
+      h("div", { class: "small muted" }, g.props.stabilityScore != null ? `stability ${g.props.stabilityScore} · modularity ${g.props.modularity}` : `density ${g.props.density}`),
+      h("div", { style: "margin-top:6px" }, mem.sort((a, b) => b.conf - a.conf).map(e => h("span", { class: "chip click", title: `membership conf ${e.conf}`, onclick: () => focusNode(e.source) }, byKey.get(e.source)?.label || e.source))),
+      h("div", { style: "margin-top:6px" }, h("button", { class: "b", onclick: () => focusNode(g.id) }, "Show in graph")));
+  })));
+  const B = D.burst;
+  if (B) for (const m of B.matrices) {
+    const steps = [[2, "seq-7", "≤2 s"], [5, "seq-6", "≤5 s"], [15, "seq-5", "≤15 s"], [60, "seq-4", "≤1 min"], [600, "seq-3", "≤10 min"], [3600, "seq-2", "≤1 h"], [Infinity, "seq-1", ">1 h"]];
+    const step = d => steps.find(s => Math.abs(d) <= s[0]);
+    kids.push(h("h2", {}, "Synchronized-posting raster: ", m.originLabel));
+    kids.push(h("p", { class: "small muted" }, "Each column is a post by the originator. A cell shows how quickly each other actor posted the same object (identical text, forward, URL or media fingerprint). More intense colour (further from the background) means faster. Hover a cell for the evidence and click it to open the message."));
+    kids.push(h("div", { class: "legend" }, steps.map(s => h("span", {}, h("span", { class: "sw", style: `background:${css(s[1])}` }), " ", s[2])), h("span", {}, h("span", { class: "sw", style: `background:${css("surface-2")}` }), " no matching post")));
+    const table = h("table", { class: "hm" },
+      h("tr", {}, h("th", {}, ""), m.cols.map((c, i) => h("th", { class: "col", title: c.label }, "#" + (i + 1)))),
+      m.rows.map(r => h("tr", {}, h("th", { style: "cursor:pointer", onclick: () => focusNode(r.key) }, r.label),
+        m.cols.map((c, i) => { const cell = r.cells[i];
+          if (!cell) return h("td", { class: "cell none" });
+          const s = step(cell.d);
+          return h("td", { class: "cell", style: `background:${css(s[1])}`,
+            onmousemove: ev => showTip(ev, [r.label, `${cell.d >= 0 ? "+" : ""}${cell.d}s after originator (${cell.k})`, c.label]), onmouseleave: hideTip,
+            onclick: () => focusNode(cell.c) }); }))));
+    kids.push(h("div", { style: "overflow-x:auto" }, table));
+  }
+  const pairT = ["SYNC_POST", "IDENTICAL_POST", "CO_FORWARD", "NEAR_DUP_POST", "CO_URL", "CO_FINGERPRINT", "SAME_CREATION_DATE", "NAME_HISTORY_LINK", "FORWARDS_FROM"];
+  const pairs = D.edges.filter(e => pairT.includes(e.type)).sort((a, b) => (b.props.sharedObjects || b.props.count || 0) - (a.props.sharedObjects || a.props.count || 0));
+  kids.push(h("h2", {}, `Coordination and propagation edges (${pairs.length})`));
+  kids.push(h("div", { style: "max-height:420px;overflow:auto" }, h("table", { class: "t" },
+    h("tr", {}, ["Type", "A", "B", "Status", "Conf", "Shared objects / events", "Min Δt (s)", ""].map(x => h("th", {}, x))),
+    pairs.slice(0, 300).map(e => h("tr", {}, h("td", {}, e.type), h("td", {}, byKey.get(e.source)?.label), h("td", {}, byKey.get(e.target)?.label),
+      h("td", {}, statusBadge(e.status)), h("td", { class: "num" }, e.conf.toFixed(2)), h("td", { class: "num" }, e.props.sharedObjects || e.props.count),
+      h("td", { class: "num" }, e.props.minDeltaSec ?? ""), h("td", {}, h("button", { class: "b", onclick: () => focusEdge(e.id) }, "evidence")))))));
+  page.replaceChildren(...kids);
+}
+
+// ------------------------------------------------------------- identity
+function renderIdentity() {
+  const js = D.nodes.filter(n => n.labels.includes("IdentityJudgement")).sort((a, b) => (b.props.score || 0) - (a.props.score || 0));
+  const pcs = D.nodes.filter(n => n.labels.includes("PersonCluster"));
+  const jb = j => ({ positive: "good", negative: "critical", unsure: "warning", no_judgement: "muted" }[j] || "muted");
+  const icon = j => ({ positive: "✓", negative: "✕", unsure: "?", no_judgement: "·" }[j] || "·");
+  $("#identityPage").replaceChildren(
+    h("h2", {}, "Identity judgements (nomenklatura model)"),
+    h("p", { class: "small muted" }, "The algorithm only proposes (no_judgement + score from noisy-OR over non-biometric evidence). Analysts decide. A positive judgement mints a PersonCluster; a negative one is a cannot-link that blocks transitive merges. Never owl:sameAs. Face and voice matching are excluded by design."),
+    js.length ? h("table", { class: "t" },
+      h("tr", {}, ["Account A", "Account B", "Score", "Evidence features", "Judgement", "Decided by", "Legal basis / rationale", ""].map(x => h("th", {}, x))),
+      js.map(j => { const p = j.props; return h("tr", {},
+        h("td", {}, h("span", { class: "chip click", onclick: () => focusNode(p.source) }, byKey.get(p.source)?.label || p.source)),
+        h("td", {}, h("span", { class: "chip click", onclick: () => focusNode(p.target) }, byKey.get(p.target)?.label || p.target)),
+        h("td", { style: "min-width:110px" }, h("div", { class: "bartrack" }, h("div", { class: "bar", style: `width:${Math.round((p.score || 0) * 100)}%;background:${css("s5")}` })), h("span", { class: "small" }, (p.score ?? "–").toString())),
+        h("td", {}, (p.features || []).map(f => h("span", { class: "chip" }, f))),
+        h("td", {}, h("span", { class: "badge", style: `border-color:${css(jb(p.judgement))}` }, h("span", { style: `color:${css(jb(p.judgement))}` }, icon(p.judgement)), p.judgement), p.conflict ? h("div", { class: "sev-warning small" }, p.conflict) : null),
+        h("td", { class: "small" }, p.decidedBy),
+        h("td", { class: "small" }, p.legalBasis || "", p.rationale ? h("div", { class: "muted" }, p.rationale) : null),
+        h("td", {}, h("button", { class: "b", onclick: () => { const e = D.edges.find(x => x.type === "CANDIDATE_SAME_PERSON" && x.props.judgementKey === j.id); e ? focusEdge(e.id) : focusNode(j.id); } }, "evidence"))); })) : h("p", { class: "empty" }, "No candidates above threshold."),
+    h("h2", {}, "Person clusters"),
+    pcs.length ? h("div", { class: "grid2" }, pcs.map(pc => h("div", { class: "card" },
+      h("div", {}, h("b", {}, pc.label), " ", statusBadge("analyst"), pc.props.exploded ? h("span", { class: "sev-warning" }, " exploded") : ""),
+      h("div", { class: "small muted" }, "minted by ", pc.props.mintedBy),
+      h("div", { style: "margin-top:6px" }, (inE.get(pc.id) || []).filter(e => e.type === "OPERATED_BY" && !e.props.deletedAt).map(e => h("span", { class: "chip click", onclick: () => focusNode(e.source) }, byKey.get(e.source)?.label || e.source)))))) : h("p", { class: "empty" }, "No positive judgements yet."),
+  );
+}
+
+// ------------------------------------------------------------- media
+function renderMedia() {
+  const media = D.nodes.filter(n => n.labels.includes("Media") && !n.labels.includes("PhotoRendition"));
+  const order = { Document: 0, VoiceNote: 1, Photo: 2, Sticker: 3 };
+  // most informative first: byte-preserved documents and voice, then images; perceptual duplicates last
+  const prio = n => n.labels.includes("VoiceNote") || n.labels.includes("RoundVideo") ? 0 : n.props.sendMode === "DocumentMode" && n.props.localPath !== undefined ? 1
+    : n.props.sendMode === "DocumentMode" ? 1 : n.props.fileStatus ? 3 : 2;
+  const seenFp = new Set();
+  const dupRank = n => { const fp = (inE.get(n.id) || []).find(e => e.type === "FINGERPRINT_OF"); if (!fp) return 0; if (seenFp.has(fp.source)) return 1; seenFp.add(fp.source); return 0; };
+  media.sort((a, b) => prio(a) - prio(b) || b.deg - a.deg);
+  const ranks = new Map(media.map(n => [n.id, dupRank(n)]));
+  media.sort((a, b) => ranks.get(a.id) - ranks.get(b.id) || prio(a) - prio(b));
+  const nb = (id, type, dir = "out") => ((dir === "out" ? outE : inE).get(id) || []).filter(e => e.type === type);
+  const cards = media.map(n => {
+    const p = n.props;
+    const cls = n.labels.filter(l => !["Media", "File"].includes(l)).join(" · ");
+    const ids = nb(n.id, "CONTAINS_IDENTIFIER").map(e => byKey.get(e.target));
+    const dev = nb(n.id, "CAPTURED_WITH").map(e => byKey.get(e.target));
+    const geo = nb(n.id, "HAS_EXIF_GPS").map(e => byKey.get(e.target));
+    const meta = nb(n.id, "HAS_METADATA").map(e => byKey.get(e.target));
+    const fps = nb(n.id, "FINGERPRINT_OF", "in").map(e => byKey.get(e.source));
+    const nd = [...nb(n.id, "NEAR_DUPLICATE_OF"), ...nb(n.id, "NEAR_DUPLICATE_OF", "in")];
+    const shared = fps.reduce((a, f) => a + (outE.get(f.id) || []).filter(e => e.type === "FINGERPRINT_OF").length - 1, 0);
+    const avatar = nb(n.id, "HAS_AVATAR", "in").length > 0;
+    const posts = nb(n.id, "HAS_MEDIA", "in").length;
+    return h("div", { class: "card" },
+      n.thumb ? thumbImg(n.thumb, avatar) : null,
+      p.waveform ? waveform(p.waveform) : null,
+      h("div", { style: "margin-top:6px" }, h("b", {}, n.label)),
+      h("div", { class: "small" }, cls),
+      h("div", { style: "margin:4px 0" },
+        p.sendMode ? h("span", { class: "chip", title: p.sendMode === "PhotoMode" ? "server re-encoded renditions only: no original bytes, EXIF/C2PA treated as absent" : "original bytes preserved: sha256 identity and metadata valid" }, p.sendMode === "PhotoMode" ? "photo mode · no original bytes" : "document mode · original bytes") : null,
+        p.fileStatus ? h("span", { class: "chip sev-warning" }, p.fileStatus) : null,
+        p.isEncrypted ? h("span", { class: "chip sev-warning" }, "encrypted · left closed") : null,
+        posts ? h("span", { class: "chip" }, `in ${posts} message${posts > 1 ? "s" : ""}`) : null,
+        avatar ? h("span", { class: "chip" }, "avatar") : null),
+      p.sha256 ? h("div", { class: "mono small muted" }, "sha256 ", p.sha256.slice(0, 24), "…") : null,
+      fps.map(f => h("div", { class: "mono small muted" }, f.props.algorithm, " ", f.props.hashHex, shared ? h("span", { class: "chip" }, `shared by ${shared + 1} files`) : null)),
+      nd.length ? h("div", { class: "small" }, h("span", { class: "chip click", onclick: () => focusEdge(nd[0].id) }, `${nd.length} near-duplicate${nd.length > 1 ? "s" : ""}`)) : null,
+      dev.length || geo.length ? h("div", { class: "small", style: "margin-top:4px" }, h("b", {}, "EXIF (document mode): "),
+        dev.map(d => h("span", { class: "chip click", onclick: () => focusNode(d.id) }, `${d.props.make || ""} ${d.props.model || ""} · serial ${d.props.bodySerial}`)),
+        geo.map(g => h("span", { class: "chip click", title: "GPS from EXIF is spoofable", onclick: () => focusNode(g.id) }, `GPS ${g.props.lat}, ${g.props.lon}`))) : null,
+      meta.map(m => h("div", { class: "small", style: "margin-top:4px" }, h("b", {}, "Document metadata "), statusBadge("file_declared"), " ",
+        ["author", "producer", "title", "xmpDocumentID"].filter(k => m.props[k]).map(k => h("span", { class: "chip" }, `${k}: ${m.props[k]}`)))),
+      ids.length ? h("div", { class: "small", style: "margin-top:4px" }, h("b", {}, "Identifiers: "), ids.map(i => h("span", { class: "chip click", onclick: () => focusNode(i.id) }, i.labels.filter(l => l !== "Identifier")[0] + " " + String(i.props.value).slice(0, 26)))) : null,
+      transcriptBlock(n.id),
+      h("div", { style: "margin-top:6px" }, h("button", { class: "b", onclick: () => focusNode(n.id) }, "Show in graph")));
+  });
+  $("#mediaPage").replaceChildren(h("h2", {}, `Media (${media.length})`),
+    h("p", { class: "small muted" }, "Photos (photo mode) have no original bytes, so they get perceptual fingerprints only. Documents keep their original bytes, so sha256 identity, EXIF and embedded metadata are meaningful. Avatars stay blurred until clicked. Faces are never recognised or clustered."),
+    h("div", { class: "gallery" }, cards));
+}
+
+// ------------------------------------------------------------- coverage
+function renderCoverage() {
+  const F = D.findings, sev = ["violation", "warning", "info"];
+  const st = D.report.stats || {};
+  const famRows = Object.entries(st.node_families || {}).sort((a, b) => b[1] - a[1]);
+  const maxF = Math.max(...famRows.map(r => r[1]), 1);
+  const typeRows = Object.entries(st.edge_types || {}).sort((a, b) => b[1] - a[1]);
+  const maxT = Math.max(...typeRows.map(r => r[1]), 1);
+  $("#coveragePage").replaceChildren(
+    h("div", { class: "grid2" },
+      h("div", { class: "card" }, h("h2", {}, "Guardrail validation"),
+        h("p", { class: "small muted" }, "These are TGO rules as executable checks. They cover: derived-edge provenance, no sameAs, no biometrics, person only by judgement, stable keys, no EXIF on photo-mode media, Art. 9 memberships, admin-only signals, sticker ownership, and viewer-relative facts."),
+        sev.map(s => { const fs = F.filter(f => f.severity === s); return h("details", { open: s !== "info" && fs.length < 30 },
+          h("summary", {}, h("span", { class: "sev-" + s }, s === "violation" ? "✕ " : s === "warning" ? "! " : "i "), `${s} (${fs.length})`),
+          h("table", { class: "t" }, fs.map(f => h("tr", {}, h("td", { class: "small" }, f.rule), h("td", { class: "small mono" }, f.subject.slice(0, 80)), h("td", { class: "small" }, f.message))))); })),
+      h("div", { class: "card" }, h("h2", {}, "What cannot be obtained"),
+        h("p", { class: "small muted" }, "These are modeled as typed gaps, never guessed."),
+        h("table", { class: "t" }, D.notObtainable.map(([a, b]) => h("tr", {}, h("td", {}, a), h("td", { class: "small muted" }, b)))))),
+    h("h2", {}, "Collection and detection runs (PROV-O)"),
+    h("div", { style: "max-height:380px;overflow:auto" }, h("table", { class: "t" },
+      h("tr", {}, ["Run", "Kind", "Tool", "Version", "Code licence", "Weights licence", "Edges written"].map(x => h("th", {}, x))),
+      D.runs.sort((a, b) => b.edges - a.edges).map(r => h("tr", {}, h("td", { class: "mono small" }, r.key.replace(/^run:/, "")), h("td", {}, r.kind),
+        h("td", {}, r.agent.tool || ""), h("td", {}, r.agent.version || ""), h("td", {}, r.agent.codeLicense || ""), h("td", {}, r.agent.weightsLicense || ""), h("td", { class: "num" }, r.edges))))),
+    h("div", { class: "grid2", style: "margin-top:12px" },
+      h("div", { class: "card" }, h("h2", {}, "Nodes by family"), h("table", { class: "t" }, famRows.map(([k, v]) => h("tr", {}, h("td", {}, D.families[k]?.name || k),
+        h("td", { style: "width:55%" }, h("div", { class: "bartrack" }, h("div", { class: "bar", style: `width:${100 * v / maxF}%` }))), h("td", { class: "num" }, v))))),
+      h("div", { class: "card" }, h("h2", {}, "Edges by type"), h("div", { style: "max-height:420px;overflow:auto" }, h("table", { class: "t" }, typeRows.map(([k, v]) => h("tr", {}, h("td", { class: "small" }, k),
+        h("td", { style: "width:50%" }, h("div", { class: "bartrack" }, h("div", { class: "bar", style: `width:${100 * v / maxT}%` }))), h("td", { class: "num" }, v))))))),
+    h("h2", {}, "Pipeline step timings"), kvTable(D.report.timings || {}),
+  );
+}
+
+// ------------------------------------------------------------- ontology
+function renderOnto() {
+  const layers = {};
+  D.classes.forEach(c => (layers[c.layer] = layers[c.layer] || []).push(c));
+  $("#ontoPage").replaceChildren(
+    h("h2", {}, "TGO classes (TBox, also exported as ontology.ttl)"),
+    h("div", { class: "grid2" }, Object.entries(layers).map(([l, cs]) => h("div", { class: "card" }, h("h3", {}, l + " layer"),
+      h("table", { class: "t" }, cs.map(c => h("tr", {}, h("td", {}, h("b", {}, "tg:" + c.name), c.parents.length ? h("div", { class: "small muted" }, "⊑ " + c.parents.map(p => "tg:" + p).join(", ")) : null),
+        h("td", { class: "small" }, statusBadge(c.epistemic), " ", c.align.join(", "), c.doc ? h("div", { class: "muted" }, c.doc) : null))))))),
+    h("h2", {}, "Relationship types"),
+    h("table", { class: "t" }, h("tr", {}, ["Type", "Group", "Observability tier", "Default status", "FtM", "Note"].map(x => h("th", {}, x))),
+      D.relations.map(r => h("tr", {}, h("td", { class: "mono" }, r.name),
+        h("td", {}, h("span", { class: "swl", style: `border-top-color:${css(D.edgeGroups[r.group].color)};border-top-width:3px` }), " ", D.edgeGroups[r.group].name),
+        h("td", {}, r.tier), h("td", {}, statusBadge(r.status)), h("td", {}, r.ftm || ""), h("td", { class: "small muted" }, r.doc)))),
+  );
+}
+
+// ------------------------------------------------------------- boot
+setView("Actors");
+initCy();
+apply(true);
+renderCoord(); renderIdentity(); renderMedia(); renderCoverage(); renderOnto();
+{ const hsh = decodeURIComponent(location.hash.replace(/^#\/?/, ""));
+  const m = hsh.match(/^(edge|node)\/(.+)$/);
+  if (m) setTimeout(() => (m[1] === "edge" ? focusEdge : focusNode)(m[2]), 50);
+  else if (hsh && document.getElementById(hsh)) showTab(hsh); }
+document.querySelectorAll("#tabs button[data-tab]").forEach(b => b.addEventListener("click", () => history.replaceState(null, "", "#/" + b.dataset.tab)));
+</script>
+</body>
+</html>

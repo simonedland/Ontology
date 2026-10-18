@@ -114,5 +114,5 @@ downloads anything, except `collect`, which by definition does.
 
 ## CI
 
-The `docker` job in [ci.yml](../.github/workflows/ci.yml) builds the image, runs the demo and the DuckDB
+The `docker` job in [ci.yml](../ci.yml) builds the image, runs the demo and the DuckDB
 engine under `network_mode: none` with a read-only root, and runs the test suite in the `dev` image.

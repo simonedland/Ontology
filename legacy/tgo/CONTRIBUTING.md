@@ -78,8 +78,8 @@ Telegram data. **Never commit real exports, session files or personal data.**
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs on every push, on pull requests and on demand
-(`workflow_dispatch`). Three jobs:
+[`ci.yml`](ci.yml) (archived here from `.github/workflows/`; it no longer runs, and its paths assume the
+pre-move repo root) ran on every push, on pull requests and on demand (`workflow_dispatch`). Three jobs:
 
 | Job | Runs on | What it proves |
 |---|---|---|

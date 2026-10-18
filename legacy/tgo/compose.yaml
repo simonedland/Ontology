@@ -1,0 +1,222 @@
+# TGO stack. One image, every piece a profile; nothing starts unless you ask for it.
+# Copy .env.example to .env and change what you need; docs/docker.md has recipes.
+#
+#   docker compose build                                   build tgo:local (extras from TGO_EXTRAS)
+#   docker compose run --rm demo                           synthetic case -> workspace/out/demo
+#   docker compose run --rm pipeline                       workspace/data -> workspace/out/$TGO_CASE
+#   docker compose run --rm tgo <any tgo sub-command>      e.g. `tgo dashboard --out /out/case`
+#   docker compose --profile viewer up -d                  browse workspace/out at http://127.0.0.1:8000
+#   docker compose --profile live up -d                    live dashboard (tgo serve) on :8765
+#   docker compose run --rm collect --target @chan ...     the ONLY service with internet access
+#   docker compose --profile neo4j up -d                   bulk-import out/$TGO_CASE/neo4j, serve on :7474
+#   docker compose --profile ontop up -d                   SPARQL on :8080
+#   docker compose run --rm test                           repo test-suite inside the image, offline
+#
+# Host-side variables below deliberately avoid the TGO_<SECTION>_ prefixes (TGO_SCALE_, TGO_VIEWER_,
+# TGO_PLUGINS_ ...): inside the containers those are parsed as config overrides and unknown fields raise.
+# Network model:
+#   * pipeline-type services: network_mode none (no interface at all; native code cannot phone home)
+#   * servers (viewer, live, neo4j, ontop): `backend`, an internal network (no egress, no published ports)
+#   * proxy: the only container that publishes ports, always on 127.0.0.1, forwarding into `backend`
+#   * collect: default bridge, because it talks to Telegram
+# Extend with compose.override.yaml (auto-loaded) or `-f compose.yaml -f my.yaml`.
+name: ${TGO_PROJECT:-tgo}
+
+x-build: &build
+  context: .
+  target: runtime
+  args:
+    TGO_EXTRAS: ${TGO_EXTRAS:-scale}
+    APT_PACKAGES: ${TGO_APT_PACKAGES:-}
+    PIP_EXTRA: ${TGO_PIP_EXTRA:-}
+    UID: ${TGO_UID:-1000}
+    GID: ${TGO_GID:-1000}
+
+x-tgo: &tgo
+  image: ${TGO_IMAGE:-tgo:local}
+  build: *build
+  user: "${TGO_UID:-1000}:${TGO_GID:-1000}"
+  init: true
+  read_only: true
+  tmpfs: [/tmp, "/home/tgo:uid=${TGO_UID:-1000},gid=${TGO_GID:-1000}"]
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  environment: &tgo-env
+    TGO_DOMAIN: ${TGO_DOMAIN:-tgo.example.org}
+    TGO_CONFIG: ${TGO_CONFIG:-/config/tgo.toml}
+    TGO_PLUGINS: ${TGO_PLUGINS:-}
+    TGO_WHISPER_MODEL: ${TGO_WHISPER_MODEL:-}
+    TGO_OCR_MODELS: ${TGO_OCR_MODELS:-}
+    # Container limits are invisible to os.cpu_count()/DuckDB auto-detection: size them explicitly.
+    TGO_SCALE_WORKERS: ${TGO_SCALE_WORKERS:-3}
+    TGO_SCALE_THREADS: ${TGO_SCALE_THREADS:-4}
+    TGO_SCALE_MEMORY_LIMIT: ${TGO_SCALE_MEMORY_LIMIT:-5GB}
+    TGO_SCALE_TEMP_DIRECTORY: /spill
+    TGO_SCALE_EXPORTS: ${TGO_SCALE_EXPORTS:-["parquet","neo4j"]}   # n-triples is slow and multi-GB at 10M+
+  # Any other setting: put TGO_<SECTION>_<FIELD>=value lines here (e.g. TGO_COORDINATION_TIME_WINDOW=60).
+  env_file:
+    - path: ${TGO_CONFIG_DIR:-./workspace/config}/tgo.env
+      required: false
+  volumes: &tgo-volumes
+    - ${TGO_DATA:-./workspace/data}:/data:ro
+    - ${TGO_OUT:-./workspace/out}:/out
+    - ${TGO_CONFIG_DIR:-./workspace/config}:/config:ro
+    - ${TGO_PLUGIN_DIR:-./workspace/plugins}:/plugins:ro
+    - ${TGO_MODELS:-./workspace/models}:/models:ro
+    - spill:/spill
+  deploy:
+    resources:
+      limits:
+        cpus: "${TGO_CPUS:-4}"
+        memory: ${TGO_MEMORY:-8g}
+
+services:
+  # Generic CLI: docker compose run --rm tgo <sub-command> [args]
+  tgo:
+    <<: *tgo
+    network_mode: none
+    profiles: [cli]
+
+  demo:
+    <<: *tgo
+    network_mode: none
+    profiles: [demo]
+    command: demo --dashboard --out /out/demo
+
+  pipeline:
+    <<: *tgo
+    network_mode: none
+    profiles: [pipeline]
+    command: run --input /data/${TGO_INPUT:-} --out /out/${TGO_CASE:-case} --dashboard ${TGO_RUN_ARGS:-}
+
+  test:
+    <<: *tgo
+    network_mode: none
+    image: ${TGO_IMAGE:-tgo:local}-dev
+    build:
+      <<: *build
+      target: dev
+    profiles: [test]
+    working_dir: /src
+    env_file: []
+    environment: {}     # repo defaults only: the suite asserts default config values
+    volumes: []
+
+  # Live collection (Telethon). Needs TG_API_ID/TG_API_HASH and a lawful basis. Writes into the data dir.
+  collect:
+    <<: *tgo
+    image: ${TGO_IMAGE:-tgo:local}-collect
+    build:
+      <<: *build
+      args:
+        TGO_EXTRAS: ${TGO_EXTRAS:-scale},collect
+        APT_PACKAGES: ${TGO_APT_PACKAGES:-}
+        PIP_EXTRA: ${TGO_PIP_EXTRA:-}
+        UID: ${TGO_UID:-1000}
+        GID: ${TGO_GID:-1000}
+    profiles: [collect]
+    network_mode: bridge
+    entrypoint: [tgo-entrypoint, collect]
+    command: [--help]
+    environment:
+      <<: *tgo-env
+      TG_API_ID: ${TG_API_ID:-}
+      TG_API_HASH: ${TG_API_HASH:-}
+      TG_SESSION: /session/collector
+    volumes:
+      - ${TGO_DATA:-./workspace/data}:/data
+      - ${TGO_SESSION_DIR:-./workspace/session}:/session
+
+  # ---- servers: internal network only, reached through the proxy ----
+  viewer:
+    <<: *tgo
+    profiles: [viewer]
+    networks: [backend]
+    command: [python, -m, http.server, --directory, /out, --bind, 0.0.0.0, "8000"]
+    volumes:
+      - ${TGO_OUT:-./workspace/out}:/out:ro
+
+  live:
+    <<: *tgo
+    profiles: [live]
+    networks: [backend]
+    healthcheck:
+      test: [CMD, python, -I, -c, "import urllib.request as u; u.urlopen('http://127.0.0.1:8765/healthz', timeout=3)"]
+      interval: 30s
+      start_period: 20s
+    command: serve --input /data/${TGO_INPUT:-} --out /out/${TGO_CASE:-live} --host 0.0.0.0 --port 8765 --token=${TGO_TOKEN:-} --interval ${TGO_INTERVAL:-5}
+
+  proxy:
+    image: ${TGO_IMAGE:-tgo:local}
+    build: *build
+    profiles: [viewer, live, neo4j, ontop]
+    user: "${TGO_UID:-1000}:${TGO_GID:-1000}"
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [edge, backend]
+    command: [python, -I, /usr/local/bin/tgo-proxy.py]
+    environment:
+      TGO_PROXY_ROUTES: ${TGO_PROXY_ROUTES:-8000=viewer:8000,8765=live:8765,7474=neo4j:7474,7687=neo4j:7687,8080=ontop:8080}
+    ports:
+      - "${TGO_BIND:-127.0.0.1}:${TGO_PORT_VIEWER:-8000}:8000"
+      - "${TGO_BIND:-127.0.0.1}:${TGO_PORT_LIVE:-8765}:8765"
+      - "${TGO_BIND:-127.0.0.1}:${NEO4J_HTTP_PORT:-7474}:7474"
+      - "${TGO_BIND:-127.0.0.1}:${NEO4J_BOLT_PORT:-7687}:7687"
+      - "${TGO_BIND:-127.0.0.1}:${ONTOP_PORT:-8080}:8080"
+
+  # Neo4j serving tier: a disposable view rebuilt from a duckdb-engine run (<out>/<case>/neo4j).
+  neo4j-import:
+    image: &neo4j-image neo4j:5.26.32-community@sha256:0a6e7aedf54a531f76286032d4365ead65b11cca05e4a15cdf23b8e53d6db02b
+    profiles: [neo4j]
+    network_mode: none
+    # list form: compose's string-command splitting would eat the ";"
+    command: [neo4j-admin, database, import, full, neo4j, --overwrite-destination, --id-type=integer,
+              '--array-delimiter=;', --nodes=/import/nodes.csv, --relationships=/import/relationships.csv]
+    volumes: &neo4j-volumes
+      - neo4j_data:/data
+      - ${TGO_OUT:-./workspace/out}/${TGO_CASE:-case}/neo4j:/import:ro
+
+  neo4j:
+    image: *neo4j-image   # 5.26 LTS, GPLv3; Enterprise if property-level RBAC is required
+    profiles: [neo4j]
+    networks: [backend]
+    depends_on:
+      neo4j-import: {condition: service_completed_successfully}   # every `up` rebuilds the view from the run
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-}          # empty -> Neo4j refuses to start (fail closed)
+      NEO4J_server_memory_pagecache_size: ${NEO4J_PAGECACHE:-4G}
+      NEO4J_server_memory_heap_max__size: ${NEO4J_HEAP:-4G}
+      NEO4J_dbms_usage__report_enabled: "false"
+      NEO4J_client_allow__telemetry: "false"
+      NEO4J_server_bolt_telemetry_enabled: "false"
+      NEO4J_browser_remote__content__hostname__whitelist: localhost
+      # never NEO4J_PLUGINS (downloads jars at start); drop pre-fetched jars into workspace/neo4j-plugins
+    volumes:
+      - neo4j_data:/data
+      - ${TGO_NEO4J_PLUGINS:-./workspace/neo4j-plugins}:/plugins:ro
+
+  # SPARQL over the DuckDB store (no triple copy). First: docker compose run --rm tgo ontop --out /out/<case>
+  # and put duckdb_jdbc-<ver>.jar (matching the duckdb wheel) in workspace/jdbc.
+  ontop:
+    image: ontop/ontop@sha256:d19a2055b02812c8ecc0a00cca1733c1669c4143dfeb728acbfdff92b45e94d7   # Apache-2.0
+    profiles: [ontop]
+    networks: [backend]
+    environment:
+      ONTOP_ONTOLOGY_FILE: /opt/ontop/input/ontology.ttl
+      ONTOP_MAPPING_FILE: /opt/ontop/input/tgo.obda
+      ONTOP_PROPERTIES_FILE: /opt/ontop/input/tgo.properties
+    volumes:
+      - ${TGO_OUT:-./workspace/out}/${TGO_CASE:-case}:/data:ro
+      - ${TGO_OUT:-./workspace/out}/${TGO_CASE:-case}/ontop:/opt/ontop/input:ro
+      - ${TGO_JDBC:-./workspace/jdbc}:/opt/ontop/jdbc:ro
+
+networks:
+  backend:
+    internal: true
+  edge: {}
+
+volumes:
+  spill: {}
+  neo4j_data: {}

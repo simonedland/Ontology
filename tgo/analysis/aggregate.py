@@ -12,6 +12,7 @@ from ..graph import Graph
 
 
 def chat_of(g: Graph, key: str) -> str | None:
+    """Chat key of a message (or ``key`` itself if it already is a peer key)."""
     if key.split(":", 1)[0] in ("channel", "chat", "user", "community") and "/" not in key:
         return key
     for e in g.out_edges(key, "IN_CHAT"):
@@ -20,12 +21,14 @@ def chat_of(g: Graph, key: str) -> str | None:
 
 
 def sender_of(g: Graph, msg_key: str) -> str | None:
+    """Account that SENT ``msg_key`` (channel posts are sent by the channel), or None."""
     for e in g.in_edges(msg_key, "SENT"):
         return e.src
     return None
 
 
 def run(g: Graph) -> dict:
+    """Write the actor-level projections (POSTED_IN, FORWARDS_FROM, MENTIONS, NAME_HISTORY_LINK, SAME_FILE_AS)."""
     n = {"POSTED_IN": 0, "FORWARDS_FROM": 0, "MENTIONS": 0, "NAME_HISTORY_LINK": 0, "SAME_FILE_AS": 0}
     with g.activity("DetectionRun", "aggregate", agent={"tool": "tgo-aggregate", "version": "0.1",
                                                           "codeLicense": "MIT", "weightsLicense": "n/a"}):

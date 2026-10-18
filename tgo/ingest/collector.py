@@ -224,6 +224,7 @@ async def collect(api_id: int | None, api_hash: str | None, session: str | None,
 
 
 def main(args) -> None:
+    """CLI adapter: run :func:`collect` with parsed ``args``."""
     asyncio.run(collect(getattr(args, "api_id", None), getattr(args, "api_hash", None),
                         getattr(args, "session", None), args.target, Path(args.out),
                         limit=args.limit, max_file_mb=args.max_file_mb, participants=not args.no_participants))

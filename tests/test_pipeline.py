@@ -85,6 +85,7 @@ def test_multi_source_merge(built):
 def test_contact_names_do_not_leak(built):
     g, _ = built
     assert g.nodes[f"user:{MARK}"].props["label"] == "Mark Dunmore"     # not the collector's "Mark (harbor)"
+    assert g.nodes[f"user:{MARK}"].props["collectorDisplayName"] == "Mark (harbor)"   # kept, but separately
     assert any(n.props.get("label") == "Mark (harbor)" for n in g.by_label("ContactAnnotation"))
 
 

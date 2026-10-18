@@ -1,0 +1,685 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+/* Tokens: the dataviz reference palette (validated light & dark). Colour follows the entity, never its rank. */
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --surface-2: #f3f2ee; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,0.10); --shadow: 0 1px 2px rgba(11,11,11,.04), 0 8px 24px rgba(11,11,11,.06);
+  --s0: #a8a69e; --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --s8: #e34948;
+  --seq-0: #eef4fc; --seq-1: #cde2fb; --seq-2: #86b6ef; --seq-3: #3987e5; --seq-4: #1c5cab; --seq-5: #0d366b;
+  --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b; --good-ink: #006300;
+  --accent-wash: rgba(42,120,214,.10);
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --surface-2: #232321; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10); --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 28px rgba(0,0,0,.35);
+    --s0: #5d5c57; --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+    --seq-0: #1d2633; --seq-1: #184f95; --seq-2: #1c5cab; --seq-3: #3987e5; --seq-4: #86b6ef; --seq-5: #cde2fb;
+    --good-ink: #0ca30c; --accent-wash: rgba(57,135,229,.16);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --surface-2: #232321; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10); --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 28px rgba(0,0,0,.35);
+  --s0: #5d5c57; --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+  --seq-0: #1d2633; --seq-1: #184f95; --seq-2: #1c5cab; --seq-3: #3987e5; --seq-4: #86b6ef; --seq-5: #cde2fb;
+  --good-ink: #0ca30c; --accent-wash: rgba(57,135,229,.16);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--page); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+button, input, select { font: inherit; color: inherit; }
+.wrap { max-width: 1480px; margin: 0 auto; padding: 0 16px 48px; }
+header.top { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--page) 88%, transparent);
+  backdrop-filter: blur(10px); border-bottom: 1px solid var(--ring); }
+header.top .wrap { display: flex; align-items: center; gap: 14px; padding-top: 12px; padding-bottom: 12px; }
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.brand .mark { width: 26px; height: 26px; border-radius: 8px; flex: none;
+  background: conic-gradient(from 210deg, var(--s1), var(--s7), var(--s5), var(--s2), var(--s4), var(--s3), var(--s1)); }
+.brand h1 { font-size: 16px; font-weight: 650; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.badge { font-size: 12px; color: var(--ink-2); border: 1px solid var(--ring); border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
+.spacer { flex: 1; }
+.iconbtn { border: 1px solid var(--ring); background: var(--surface); border-radius: 10px; padding: 6px 10px; cursor: pointer; }
+.iconbtn:hover { background: var(--surface-2); }
+.filters { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; padding: 14px 0 6px; }
+.filters .lbl { font-size: 12px; color: var(--muted); margin-right: 6px; text-transform: uppercase; letter-spacing: .04em; }
+.chips { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--ring); background: var(--surface);
+  border-radius: 999px; padding: 4px 10px; cursor: pointer; font-size: 13px; user-select: none; }
+.chip[aria-pressed="false"] { opacity: .45; }
+.chip .key { width: 14px; height: 0; border-top: 2px solid currentColor; }
+.chip .dot { width: 9px; height: 9px; border-radius: 50%; }
+.search { position: relative; }
+.search input { width: 260px; max-width: 70vw; border: 1px solid var(--ring); background: var(--surface); border-radius: 10px; padding: 7px 10px; }
+.search ul { position: absolute; z-index: 30; left: 0; right: 0; top: 100%; margin: 4px 0 0; padding: 4px; list-style: none;
+  background: var(--surface); border: 1px solid var(--ring); border-radius: 10px; box-shadow: var(--shadow); max-height: 320px; overflow: auto; }
+.search li { padding: 6px 8px; border-radius: 7px; cursor: pointer; display: flex; gap: 8px; align-items: center; }
+.search li:hover, .search li.active { background: var(--accent-wash); }
+.search li small { color: var(--muted); margin-left: auto; }
+input[type=range] { accent-color: var(--s1); width: 140px; vertical-align: middle; }
+.grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--ring); border-radius: 16px; box-shadow: var(--shadow);
+  padding: 16px 16px 12px; min-width: 0; position: relative; }
+.card h2 { font-size: 14px; font-weight: 650; margin: 0; }
+.card .sub { font-size: 12px; color: var(--ink-2); margin: 2px 0 10px; }
+.card .head { display: flex; align-items: flex-start; gap: 10px; }
+.card .head .tools { margin-left: auto; display: flex; gap: 6px; }
+.tbtn { border: 1px solid var(--ring); background: transparent; border-radius: 8px; padding: 3px 8px; font-size: 12px; color: var(--ink-2); cursor: pointer; }
+.tbtn[aria-pressed="true"] { background: var(--accent-wash); color: var(--ink); }
+.chart { width: 100%; height: 340px; }
+.chart.tall { height: 620px; }
+.chart.mid { height: 420px; }
+.span-12 { grid-column: span 12; } .span-8 { grid-column: span 8; } .span-7 { grid-column: span 7; } .span-6 { grid-column: span 6; }
+.span-5 { grid-column: span 5; } .span-4 { grid-column: span 4; } .span-3 { grid-column: span 3; }
+section { margin-top: 28px; }
+section > .sec-h { display: flex; align-items: baseline; gap: 12px; margin: 0 0 12px; }
+section > .sec-h h3 { font-size: 20px; margin: 0; font-weight: 680; letter-spacing: -.01em; }
+section > .sec-h p { margin: 0; color: var(--ink-2); font-size: 13px; }
+.kpis { display: grid; grid-template-columns: 1.6fr repeat(4, 1fr); gap: 16px; margin-top: 8px; }
+.kpi { background: var(--surface); border: 1px solid var(--ring); border-radius: 16px; padding: 14px 16px; box-shadow: var(--shadow); min-width: 0; }
+.kpi .l { font-size: 12px; color: var(--ink-2); }
+.kpi .v { font-size: 26px; font-weight: 650; letter-spacing: -.01em; margin-top: 2px; }
+.kpi .d { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.kpi.hero { grid-row: span 2; display: flex; flex-direction: column; justify-content: space-between;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--s1) 14%, var(--surface)), var(--surface) 60%); }
+.kpi.hero .v { font-size: 56px; line-height: 1.05; }
+.kpi.hero .bar { display: flex; height: 10px; border-radius: 6px; overflow: hidden; gap: 2px; margin-top: 12px; }
+.kpi.hero .bar span { display: block; height: 100%; border-radius: 3px; }
+.kpi.hero .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 12px; color: var(--ink-2); }
+.kpi.hero .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.status { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.status svg { width: 14px; height: 14px; }
+.net-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; }
+.details { border-left: 1px solid var(--ring); padding-left: 16px; min-width: 0; max-height: 620px; overflow: auto; }
+.details h4 { margin: 0 0 2px; font-size: 16px; word-break: break-word; }
+.details .k { font: 12px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace; color: var(--muted); word-break: break-all; }
+.details dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 12px; margin: 10px 0; }
+.details dt { color: var(--muted); } .details dd { margin: 0; word-break: break-word; }
+.details .rel { margin-top: 12px; }
+.details .rel h5 { margin: 0 0 4px; font-size: 12px; color: var(--ink-2); font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.details .rel button { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 3px 6px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.details .rel button:hover { background: var(--accent-wash); }
+.details .rel button small { color: var(--muted); }
+.empty { color: var(--muted); font-size: 13px; }
+.legend-row { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--ink-2); margin-top: 6px; }
+.legend-row span { display: inline-flex; align-items: center; gap: 6px; }
+.legend-row .ln { width: 18px; border-top: 2px solid var(--ink-2); }
+.legend-row .ln.dash { border-top-style: dashed; } .legend-row .ln.dot { border-top-style: dotted; }
+table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.data th { text-align: left; font-weight: 600; color: var(--ink-2); font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--grid); position: sticky; top: 0; background: var(--surface); }
+table.data td { padding: 6px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; white-space: nowrap; }
+table.data td:first-child { white-space: normal; overflow-wrap: anywhere; width: 100%; }
+table.data td.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.data tr.click { cursor: pointer; } table.data tr.click:hover td { background: var(--accent-wash); }
+.scroll { max-height: 360px; overflow: auto; }
+.meter { position: relative; height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--s5) 18%, transparent); min-width: 80px; }
+.meter > span { position: absolute; inset: 0 auto 0 0; border-radius: 4px; background: var(--s5); }
+.pill { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--ring); color: var(--ink-2); margin: 1px 3px 1px 0; }
+.tableview { display: none; max-height: 340px; overflow: auto; }
+.card.show-table .chart { display: none; } .card.show-table .tableview { display: block; }
+footer { color: var(--muted); font-size: 12px; margin-top: 32px; display: flex; gap: 16px; flex-wrap: wrap; }
+@media (max-width: 1100px) {
+  .span-8, .span-7, .span-6, .span-5, .span-4, .span-3 { grid-column: span 12; }
+  .kpis { grid-template-columns: repeat(2, 1fr); } .kpi.hero { grid-column: span 2; grid-row: auto; }
+  .net-wrap { grid-template-columns: 1fr; } .details { border-left: 0; padding-left: 0; border-top: 1px solid var(--ring); padding-top: 12px; max-height: none; }
+}
+@media (max-width: 560px) { .chart.tall { height: 460px; } .kpi.hero .v { font-size: 42px; } .search input { width: 100%; }
+  header.top .wrap { flex-wrap: wrap; row-gap: 8px; } .brand { flex: 1 1 100%; } #generated, .spacer { display: none; }
+  .iconbtn { padding: 5px 9px; font-size: 13px; } .search { flex: 1 1 100%; } }
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <div class="brand"><div class="mark" aria-hidden="true"></div><h1 id="title"></h1></div>
+  <span class="badge" id="engine"></span>
+  <span class="badge" id="generated"></span>
+  <div class="spacer"></div>
+  <a class="iconbtn" id="report-link" href="report.html" hidden>Open investigation view ↗</a>
+  <button class="iconbtn" id="theme" type="button" aria-label="Toggle light or dark theme">◐ Theme</button>
+</div></header>
+
+<main class="wrap">
+  <div class="filters" role="toolbar" aria-label="Filters (scope every relation chart)">
+    <div><span class="lbl">Evidence</span><span class="chips" id="f-status"></span></div>
+    <div><span class="lbl">Min confidence</span><input type="range" id="f-conf" min="0" max="0.9" step="0.1" value="0" aria-label="Minimum confidence"> <b id="f-conf-v">0.0</b></div>
+    <div><span class="lbl">Relations</span><span class="chips" id="f-groups"></span></div>
+    <div class="search"><input id="q" type="search" placeholder="Search accounts, chats, identifiers…" autocomplete="off" aria-label="Search the network"><ul id="q-res" hidden></ul></div>
+  </div>
+  <p class="sub" id="scope-note" style="color:var(--muted);font-size:12px;margin:0"></p>
+
+  <div class="kpis" id="kpis"></div>
+
+  <section>
+    <div class="sec-h"><h3>Relations</h3><p>Who connects to whom, and through what. Message- and media-level facts are projected onto the chats and accounts that carry them.</p></div>
+    <div class="card span-12">
+      <div class="head"><div><h2>Relation network</h2><div class="sub" id="net-sub"></div></div>
+        <div class="tools"><button class="tbtn" id="net-labels" aria-pressed="false">All labels</button><button class="tbtn" id="net-reset">Reset view</button></div></div>
+      <div class="net-wrap">
+        <div><div id="network" class="chart tall" role="img" aria-label="Relation network"></div>
+          <div class="legend-row" id="net-legend"></div></div>
+        <aside class="details" id="details" aria-live="polite"><p class="empty">Click a node to see its properties and every relation, or search above.</p></aside>
+      </div>
+    </div>
+    <div class="grid" style="margin-top:16px">
+      <div class="card span-7" data-table="sankey"><div class="head"><div><h2>Relation flows</h2><div class="sub">Source family → relation group → target family, weighted by observation count</div></div>
+        <div class="tools"><button class="tbtn tv">Table</button></div></div>
+        <div id="sankey" class="chart mid"></div><div class="tableview"></div></div>
+      <div class="card span-5" data-table="chord"><div class="head"><div><h2>Family interplay</h2><div class="sub">How strongly each kind of entity is tied to the others</div></div>
+        <div class="tools"><button class="tbtn tv">Table</button></div></div>
+        <div id="chord" class="chart mid"></div><div class="tableview"></div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-h"><h3>Ontology</h3><p>The TGO vocabulary as this data actually uses it (VOWL notation: classes as circles sized by instances, labelled relations, dashed subclass links).</p></div>
+    <div class="grid">
+      <div class="card span-7"><div class="head"><div><h2>Schema graph</h2><div class="sub">Classes present in the data and the relation types between them</div></div>
+        <div class="tools"><button class="tbtn" id="sch-sub" aria-pressed="true">Subclass links</button><button class="tbtn" id="sch-prov" aria-pressed="false">Provenance</button></div></div>
+        <div id="schema" class="chart mid"></div><div class="legend-row" id="layer-legend"></div></div>
+      <div class="card span-5" data-table="hier"><div class="head"><div><h2>Class hierarchy</h2><div class="sub">Instances per class across the six TGO layers; click to zoom</div></div>
+        <div class="tools"><button class="tbtn" id="hier-all" aria-pressed="false">Unused classes</button><button class="tbtn tv">Table</button></div></div>
+        <div id="hier" class="chart mid"></div><div class="tableview"></div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-h"><h3>Activity</h3><p>Messages over time. Drag the handles to set a time window: it also filters the relation network.</p></div>
+    <div class="grid">
+      <div class="card span-8" data-table="timeline"><div class="head"><div><h2>Messages per day</h2><div class="sub" id="tl-sub">Top chats; the rest folded into "Other chats"</div></div>
+        <div class="tools"><button class="tbtn tv">Table</button></div></div>
+        <div id="timeline" class="chart"></div><div class="tableview"></div></div>
+      <div class="card span-4" data-table="heat"><div class="head"><div><h2>Weekly rhythm</h2><div class="sub">Messages by weekday and hour (UTC)</div></div>
+        <div class="tools"><button class="tbtn tv">Table</button></div></div>
+        <div id="heat" class="chart"></div><div class="tableview"></div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-h"><h3>Evidence quality</h3><p>How each fact is known: observed on the platform, declared by a file, inferred by an algorithm or decided by an analyst.</p></div>
+    <div class="grid">
+      <div class="card span-7" data-table="quality"><div class="head"><div><h2>Epistemic status by relation group</h2><div class="sub">Observation counts</div></div>
+        <div class="tools"><button class="tbtn tv">Table</button></div></div>
+        <div id="quality" class="chart"></div><div class="tableview"></div></div>
+      <div class="card span-5" data-table="conf"><div class="head"><div><h2>Confidence of derived facts</h2><div class="sub">Inferred, file-declared and analyst edges</div></div>
+        <div class="tools"><button class="tbtn tv">Table</button></div></div>
+        <div id="conf" class="chart"></div><div class="tableview"></div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-h"><h3>Findings</h3><p>Detected structure, identity candidates and guardrails. Click a row to focus it in the network.</p></div>
+    <div class="grid">
+      <div class="card span-6"><div class="head"><div><h2>Inferred groups</h2><div class="sub">Coordination and community clusters</div></div></div><div class="scroll" id="clusters"></div></div>
+      <div class="card span-6"><div class="head"><div><h2>Identity candidates</h2><div class="sub">Scored, never merged without a judgement</div></div></div><div class="scroll" id="identity"></div></div>
+      <div class="card span-4" data-table="rules"><div class="head"><div><h2>Guardrails</h2><div class="sub" id="rules-sub"></div></div>
+        <div class="tools"><button class="tbtn tv">Table</button></div></div>
+        <div id="rules" class="chart"></div><div class="tableview"></div></div>
+      <div class="card span-4"><div class="head"><div><h2>Most-mentioned identifiers</h2><div class="sub">Checksum-validated, across all text</div></div></div><div class="scroll" id="idents"></div></div>
+      <div class="card span-4"><div class="head"><div><h2>Busiest chats</h2><div class="sub">Messages in the store</div></div></div><div class="scroll" id="chats"></div></div>
+    </div>
+  </section>
+  <footer><span>TGO · offline dashboard · Apache ECharts (Apache-2.0) inlined</span><span id="foot-gen"></span></footer>
+</main>
+
+<script id="tgo-dash" type="application/json">__TGO_DASH__</script>
+<script>/*__ECHARTS__*/</script>
+<script>
+"use strict";
+const D = JSON.parse(document.getElementById("tgo-dash").textContent);
+const S = D.style;
+const FAM_NAMES = {Account: "Accounts", Chat: "Chats & channels", Community: "Communities", InferredGroup: "Inferred groups",
+  Group: "Groups", Person: "Person clusters", Identifier: "Identifiers", Device: "Devices & places", Media: "Media"};
+const STATUS_NAME = {observed: "Observed", inferred: "Inferred", file_declared: "File-declared", analyst: "Analyst"};
+const STATUS_SLOT = {observed: 1, inferred: 2, file_declared: 4, analyst: 7};
+const state = {status: new Set(S.statuses), minConf: 0, groups: new Set(Object.keys(S.groups).filter(g => !S.hiddenGroups.includes(g))),
+  time: null, labels: false, schSub: true, schProv: false, hierAll: false, selected: null};
+const charts = {};
+const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + "M" : n >= 1e4 ? (n / 1e3).toFixed(n >= 1e5 ? 0 : 1) + "K" : (n || 0).toLocaleString();
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const el = (tag, attrs = {}, ...kids) => { const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) { if (k === "text") e.textContent = v; else if (k === "style") e.style.cssText = v; else if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v); }
+  for (const k of kids) if (k != null) e.append(k); return e; };
+
+// ---------------------------------------------------------------- theme tokens
+let T = {};
+function readTokens() {
+  const cs = getComputedStyle(document.documentElement), v = n => cs.getPropertyValue(n).trim();
+  T = {ink: v("--ink"), ink2: v("--ink-2"), muted: v("--muted"), grid: v("--grid"), axis: v("--axis"), surface: v("--surface"),
+    surface2: v("--surface-2"), ring: v("--ring"), good: v("--good"), warning: v("--warning"), serious: v("--serious"), critical: v("--critical"),
+    s: [0, 1, 2, 3, 4, 5, 6, 7, 8].map(i => v("--s" + i)), seq: [0, 1, 2, 3, 4, 5].map(i => v("--seq-" + i))};
+}
+const slotColor = slot => T.s[slot] || T.s[0];
+const famColor = f => slotColor(S.familySlot[f] ?? 0);
+const groupColor = g => { const t = (S.groups[g] || {}).slot || "muted"; return t === "muted" ? T.s[0] : T.s[+t.slice(1)] || T.s[0]; };
+const statusDash = st => st === "inferred" ? [6, 4] : st === "file_declared" ? [2, 3] : "solid";
+const tooltipBase = () => ({backgroundColor: T.surface, borderColor: T.ring, borderWidth: 1, padding: [8, 10],
+  textStyle: {color: T.ink, fontSize: 12}, extraCssText: "border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);max-width:340px;white-space:normal;"});
+const axisBase = () => ({axisLine: {lineStyle: {color: T.axis}}, axisTick: {show: false}, axisLabel: {color: T.muted, fontSize: 11},
+  splitLine: {lineStyle: {color: T.grid, width: 1}}});
+const tipRow = (color, value, name, dash) => `<div style="display:flex;align-items:center;gap:8px;margin:2px 0">` +
+  `<span style="width:14px;border-top:2px ${dash ? "dashed" : "solid"} ${color}"></span><b>${esc(value)}</b>` +
+  `<span style="color:${T.ink2}">${esc(name)}</span></div>`;
+
+function chart(id) {
+  if (!charts[id]) charts[id] = echarts.init(document.getElementById(id), null, {renderer: "canvas"});
+  return charts[id];
+}
+
+// ---------------------------------------------------------------- filtered flows
+function flows() {
+  return D.flows.filter(([sf, t, df, st, b]) => state.status.has(st) && b / 10 >= state.minConf - 1e-9 &&
+    state.groups.has(S.typeGroup[t] || "content"));
+}
+
+// ---------------------------------------------------------------- header + KPIs
+function renderHeader() {
+  document.getElementById("title").textContent = D.meta.title;
+  document.getElementById("engine").textContent = D.meta.engine === "duckdb" ? "DuckDB engine · corpus" : "Memory engine";
+  const g = new Date(D.meta.generated * 1000);
+  document.getElementById("generated").textContent = "Built " + g.toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  document.getElementById("foot-gen").textContent = `${fmt(D.kpi.nodes)} nodes · ${fmt(D.kpi.relations)} relations · ${fmt(D.kpi.observations)} observations`;
+  document.getElementById("scope-note").textContent = D.meta.scope_note || "";
+  if (D.meta.hasReport) document.getElementById("report-link").hidden = false;
+}
+function statusIcon(kind) {
+  const ns = "http://www.w3.org/2000/svg", svg = document.createElementNS(ns, "svg"); svg.setAttribute("viewBox", "0 0 16 16");
+  const p = document.createElementNS(ns, "path"); p.setAttribute("fill", "currentColor");
+  p.setAttribute("d", kind === "good" ? "M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm-1 10.4L3.6 8 5 6.6l2 2 4-4L12.4 6z"
+    : "M8 1 15 14H1zm-.8 5v4h1.6V6zm0 5.2v1.6h1.6v-1.6z"); svg.append(p); return svg;
+}
+function renderKpis() {
+  const k = D.kpi, box = document.getElementById("kpis"); box.replaceChildren();
+  const st = {}; for (const [sf, t, df, s, b, n] of D.flows) st[s] = (st[s] || 0) + n;
+  const tot = Object.values(st).reduce((a, b) => a + b, 0) || 1;
+  const bar = el("div", {class: "bar", role: "img", "aria-label": "Observations by epistemic status"});
+  const leg0 = el("div", {class: "d", style: "margin-top:10px", text: "Observations by how they are known"});
+  const leg = el("div", {class: "legend"});
+  for (const s of S.statuses) { if (!st[s]) continue;
+    bar.append(el("span", {style: `width:${100 * st[s] / tot}%;background:${slotColor(STATUS_SLOT[s])}`}));
+    leg.append(el("span", {}, el("i", {style: `background:${slotColor(STATUS_SLOT[s])}`}), `${STATUS_NAME[s]} ${fmt(st[s])}`)); }
+  box.append(el("div", {class: "kpi hero"}, el("div", {}, el("div", {class: "l", text: "Relations in the store"}),
+    el("div", {class: "v", text: fmt(k.relations)}),
+    el("div", {class: "d", text: `${fmt(k.nodes)} nodes · ${fmt(k.observations)} observations · ${(100 * k.derived / tot).toFixed(0)}% derived`})), el("div", {}, leg0, bar, leg)));
+  const tile = (l, v, d) => box.append(el("div", {class: "kpi"}, el("div", {class: "l", text: l}), el("div", {class: "v", text: fmt(v)}), d ? el("div", {class: "d", text: d}) : null));
+  tile("Accounts", k.accounts, "an account is never a person");
+  tile("Chats & channels", k.chats); tile("Messages", k.messages); tile("Media files", k.media);
+  tile("Identifiers", k.identifiers, "wallets, IBANs, phones, URLs…"); tile("Inferred groups", k.clusters, "coordination & communities");
+  tile("Person clusters", k.persons, "minted only by a positive judgement");
+  const ok = !k.violations, g = el("div", {class: "kpi"}, el("div", {class: "l", text: "Guardrails"}));
+  const s = el("div", {class: "v status", style: `color:${ok ? "var(--good-ink)" : "var(--critical)"}`}, statusIcon(ok ? "good" : "bad"),
+    ok ? "Pass" : `${k.violations} violation${k.violations > 1 ? "s" : ""}`);
+  g.append(s, el("div", {class: "d", text: `${k.warnings} warning${k.warnings === 1 ? "" : "s"} to review`})); box.append(g);
+}
+
+// ---------------------------------------------------------------- filters
+function renderFilters() {
+  const fs = document.getElementById("f-status"); fs.replaceChildren();
+  for (const s of S.statuses) {
+    const b = el("button", {class: "chip", type: "button", "aria-pressed": String(state.status.has(s)), style: `color:${slotColor(STATUS_SLOT[s])}`},
+      el("span", {class: "key", style: `border-top-style:${s === "inferred" ? "dashed" : s === "file_declared" ? "dotted" : "solid"}`}),
+      el("span", {style: "color:var(--ink)", text: STATUS_NAME[s]}));
+    b.onclick = () => { state.status.has(s) ? state.status.delete(s) : state.status.add(s); b.setAttribute("aria-pressed", String(state.status.has(s))); update(); };
+    fs.append(b);
+  }
+  const fg = document.getElementById("f-groups"); fg.replaceChildren();
+  for (const [g, info] of Object.entries(S.groups)) {
+    const b = el("button", {class: "chip", type: "button", "aria-pressed": String(state.groups.has(g))},
+      el("span", {class: "dot", style: `background:${groupColor(g)}`}), info.name);
+    b.onclick = () => { state.groups.has(g) ? state.groups.delete(g) : state.groups.add(g); b.setAttribute("aria-pressed", String(state.groups.has(g))); update(); };
+    fg.append(b);
+  }
+  const c = document.getElementById("f-conf");
+  c.oninput = () => { state.minConf = +c.value; document.getElementById("f-conf-v").textContent = (+c.value).toFixed(1); update(); };
+}
+
+// ---------------------------------------------------------------- network
+const NET = D.network, nodeById = new Map(NET.nodes.map(n => [n.id, n]));
+function netLinks() {
+  return NET.links.filter(l => state.status.has(l.status) && l.conf >= state.minConf - 1e-9 && state.groups.has(l.group) &&
+    (!state.time || l.t0 == null || (l.t0 <= state.time[1] && (l.t1 ?? l.t0) >= state.time[0])));
+}
+function renderNetwork() {
+  const links = netLinks(), used = new Set();
+  for (const l of links) { used.add(l.s); used.add(l.t); }
+  const keepAlways = new Set(["InferredGroup", "Person", "Community"]);
+  const nodes = NET.nodes.filter(n => used.has(n.id) || keepAlways.has(n.fam));
+  const fams = [...new Set(NET.nodes.map(n => n.fam))].sort((a, b) => (S.familySlot[a] || 9) - (S.familySlot[b] || 9));
+  const maxDeg = Math.max(1, ...nodes.map(n => n.deg)), topLabel = new Set([...nodes].sort((a, b) => b.deg - a.deg).slice(0, 18).map(n => n.id));
+  const maxCount = Math.max(1, ...links.map(l => l.count));
+  const sc = 0.5 + 0.5 * Math.min(1, document.getElementById("network").clientWidth / 900);   // smaller marks on narrow screens
+  document.getElementById("net-sub").textContent = `${nodes.length} of ${fmt(NET.total_actors)} actors · ${links.length} of ${fmt(NET.total_links)} relations shown` +
+    (state.time ? " · time window active" : "");
+  const big = links.length > 1200;     // cheaper edge style for dense views: straight, no arrows, no animation
+  chart("network").setOption({
+    animation: !big, animationDurationUpdate: 600,
+    tooltip: {...tooltipBase(), formatter: p => {
+      if (p.dataType === "edge") { const l = p.data.raw;
+        return `<div style="font-weight:600;margin-bottom:4px">${esc(l.type.replaceAll("_", " ").toLowerCase())}</div>` +
+          `<div style="color:${T.ink2}">${esc(nodeById.get(l.s)?.name)} → ${esc(nodeById.get(l.t)?.name)}</div>` +
+          tipRow(groupColor(l.group), fmt(l.count), "observations") + tipRow(groupColor(l.group), l.conf.toFixed(2), `confidence · ${STATUS_NAME[l.status] || l.status}`, l.status !== "observed") +
+          (l.ev ? `<div style="color:${T.muted};margin-top:2px">${l.ev} evidence item${l.ev > 1 ? "s" : ""}${l.proj ? " · projected from content" : ""}</div>` : "") +
+          (S.relDoc[l.type] ? `<div style="color:${T.muted};margin-top:4px">${esc(S.relDoc[l.type])}</div>` : ""); }
+      const n = p.data.raw; return `<div style="font-weight:600">${esc(n.name)}</div><div style="color:${T.ink2}">${esc(n.cls)}</div>` +
+        tipRow(famColor(n.fam), fmt(n.deg), "weighted degree"); }},
+    legend: {data: fams.map(f => FAM_NAMES[f] || f), top: 0, left: 0, icon: "circle", itemWidth: 9, itemHeight: 9, itemGap: 14,
+      textStyle: {color: T.ink2, fontSize: 12}, inactiveColor: T.axis},
+    series: [{
+      type: "graph", layout: "none", roam: true, draggable: true, top: 44, bottom: 16, left: 24, right: 90,
+      categories: fams.map(f => ({name: FAM_NAMES[f] || f, itemStyle: {color: famColor(f)}, symbol: S.familyShape[f] || "circle"})),
+      emphasis: {focus: "adjacency", lineStyle: {width: 3}, label: {show: true}},
+      blur: {itemStyle: {opacity: 0.12}, lineStyle: {opacity: 0.05}, label: {show: false}},
+      lineStyle: {curveness: big ? 0 : 0.12},
+      edgeSymbol: big ? ["none", "none"] : ["none", "arrow"], edgeSymbolSize: 6,
+      labelLayout: {hideOverlap: true}, progressive: big ? 400 : 0,
+      data: nodes.map(n => ({id: n.id, name: n.name, raw: n, value: n.deg, category: fams.indexOf(n.fam), x: n.x, y: n.y,
+        symbolSize: sc * (9 + 30 * Math.sqrt(n.deg / maxDeg)),
+        itemStyle: {borderColor: T.surface, borderWidth: 2, shadowBlur: n.id === state.selected ? 18 : 0, shadowColor: famColor(n.fam)},
+        label: {show: state.labels || topLabel.has(n.id) || n.id === state.selected, position: "right", color: T.ink, fontSize: 11,
+          formatter: n.name.length > 28 ? n.name.slice(0, 27) + "…" : n.name, textBorderColor: T.surface, textBorderWidth: 3}})),
+      links: links.map(l => ({source: l.s, target: l.t, raw: l,
+        lineStyle: {color: groupColor(l.group), type: big && l.status === "observed" ? "solid" : statusDash(l.status),
+          opacity: (big ? 0.12 : 0.25) + (big ? 0.45 : 0.6) * l.conf,
+          width: 1 + 3 * Math.log1p(l.count) / Math.log1p(maxCount)}})),
+    }],
+  }, {replaceMerge: ["series"]});
+  const legend = document.getElementById("net-legend"); legend.replaceChildren(
+    el("span", {}, el("span", {class: "ln"}), "observed"), el("span", {}, el("span", {class: "ln dash"}), "inferred"),
+    el("span", {}, el("span", {class: "ln dot"}), "file-declared"), el("span", {text: "· line width = observations · opacity = confidence · shape + colour = entity family"}));
+}
+function showDetails(id) {
+  const n = nodeById.get(id), box = document.getElementById("details"); state.selected = id; box.replaceChildren();
+  try { history.replaceState(null, "", "#/node/" + encodeURIComponent(id)); } catch (e) {}
+  if (!n) { box.append(el("p", {class: "empty", text: "Not in the network view (filtered out or beyond the cap)."})); return; }
+  box.append(el("div", {class: "status", style: `color:${famColor(n.fam)}`}, el("span", {class: "dot", style: `width:10px;height:10px;border-radius:50%;background:${famColor(n.fam)}`}),
+    el("span", {style: "color:var(--ink-2);font-weight:500", text: n.cls})));
+  box.append(el("h4", {text: n.name}), el("div", {class: "k", text: n.id}));
+  if (D.meta.hasReport) box.append(el("a", {href: "report.html#/node/" + encodeURIComponent(n.id), class: "tbtn", style: "display:inline-block;margin-top:8px;text-decoration:none", text: "Explain in investigation view ↗"}));
+  const dl = el("dl"); for (const [k, v] of Object.entries(n.props).slice(0, 18)) { if (k === "label") continue; dl.append(el("dt", {text: k}), el("dd", {text: String(v)})); }
+  box.append(dl);
+  const rel = {}; for (const l of netLinks()) { if (l.s !== id && l.t !== id) continue; (rel[l.type] ||= []).push(l); }
+  if (!Object.keys(rel).length) box.append(el("p", {class: "empty", text: "No relations under the current filters."}));
+  for (const [t, ls] of Object.entries(rel).sort((a, b) => b[1].length - a[1].length)) {
+    const sec = el("div", {class: "rel"}, el("h5", {}, el("span", {class: "dot", style: `width:8px;height:8px;border-radius:50%;background:${groupColor(ls[0].group)}`}),
+      `${t.replaceAll("_", " ").toLowerCase()} · ${ls.length}`));
+    for (const l of ls.sort((a, b) => b.count - a.count).slice(0, 12)) {
+      const other = l.s === id ? l.t : l.s, on = nodeById.get(other);
+      const b = el("button", {type: "button"}, (l.s === id ? "→ " : "← ") + (on ? on.name : other), " ", el("small", {text: `${fmt(l.count)}× · ${l.conf.toFixed(2)}`}));
+      b.onclick = () => focusNode(other); sec.append(b);
+    }
+    box.append(sec);
+  }
+}
+function focusNode(id) {
+  showDetails(id); renderNetwork();
+  const c = chart("network"), idx = c.getOption().series[0].data.findIndex(d => d.id === id);
+  if (idx >= 0) { c.dispatchAction({type: "downplay", seriesIndex: 0}); c.dispatchAction({type: "highlight", seriesIndex: 0, dataIndex: idx}); c.dispatchAction({type: "showTip", seriesIndex: 0, dataIndex: idx}); }
+  document.getElementById("network").scrollIntoView({behavior: "smooth", block: "center"});
+}
+
+// ---------------------------------------------------------------- sankey + chord
+const FAM = f => FAM_NAMES[f] || f;
+function renderSankey() {
+  const agg = new Map();
+  for (const [sf, t, df, st, b, n] of flows()) {
+    if (sf === "Run" || df === "Run") continue;
+    const g = S.typeGroup[t] || "content";
+    agg.set(`L:${sf}|G:${g}`, (agg.get(`L:${sf}|G:${g}`) || 0) + n); agg.set(`G:${g}|R:${df}`, (agg.get(`G:${g}|R:${df}`) || 0) + n);
+  }
+  const names = new Set(), links = [];
+  for (const [k, v] of agg) { const [a, b] = k.split("|"); names.add(a); names.add(b); links.push({source: a, target: b, value: v}); }
+  const label = id => id.startsWith("G:") ? (S.groups[id.slice(2)]?.name || id.slice(2)) : FAM(id.slice(2));
+  const color = id => id.startsWith("G:") ? groupColor(id.slice(2)) : famColor(id.slice(2));
+  chart("sankey").setOption({
+    tooltip: {...tooltipBase(), formatter: p => p.dataType === "edge" ? `${esc(label(p.data.source))} → ${esc(label(p.data.target))}<br><b>${fmt(p.data.value)}</b> observations`
+      : `<b>${esc(label(p.name))}</b><br>${fmt(p.value)} observations`},
+    series: [{type: "sankey", left: 8, right: 130, top: 8, bottom: 8, nodeGap: 10, nodeWidth: 12, draggable: true, layoutIterations: 48,
+      emphasis: {focus: "adjacency"}, lineStyle: {color: "gradient", opacity: 0.32, curveness: 0.5},
+      label: {color: T.ink, fontSize: 12, formatter: p => label(p.name)}, labelLayout: {hideOverlap: true},
+      data: [...names].map(n => ({name: n, itemStyle: {color: color(n), borderColor: T.surface, borderWidth: 0}})), links}],
+  }, true);
+  tables.sankey = () => [["From", "To", "Observations"], links.map(l => [label(l.source), label(l.target), l.value])];
+}
+function renderChord() {
+  const m = new Map();
+  for (const [sf, t, df, st, b, n] of flows()) {
+    if (sf === df || sf === "Run" || df === "Run" || ["Message", "Rendition", "Snapshot"].includes(sf) && ["Message", "Rendition", "Snapshot"].includes(df)) continue;
+    const [a, c] = [sf, df].sort(); m.set(a + "|" + c, (m.get(a + "|" + c) || 0) + n);
+  }
+  const fams = new Set(); for (const k of m.keys()) k.split("|").forEach(f => fams.add(f));
+  const order = [...fams].sort((a, b) => (S.familySlot[a] ?? 9) - (S.familySlot[b] ?? 9) || a.localeCompare(b));
+  const links = [...m].map(([k, v]) => { const [a, c] = k.split("|"); return {source: FAM(a), target: FAM(c), value: v}; });
+  chart("chord").setOption({
+    tooltip: {...tooltipBase(), formatter: p => p.dataType === "edge" ? `${esc(p.data.source)} ↔ ${esc(p.data.target)}<br><b>${fmt(p.data.value)}</b> observations` : `<b>${esc(p.name)}</b>`},
+    series: [{type: "chord", radius: ["70%", "78%"], center: ["50%", "52%"], padAngle: 2, minAngle: 4, clockwise: true,
+      label: {show: true, color: T.ink2, fontSize: 11, distance: 6}, labelLayout: {hideOverlap: true},
+      lineStyle: {color: "source", opacity: 0.35}, emphasis: {focus: "adjacency", lineStyle: {opacity: 0.75}},
+      itemStyle: {borderRadius: 3, borderColor: T.surface, borderWidth: 2},
+      data: order.map(f => ({name: FAM(f), itemStyle: {color: famColor(f)}})), links}],
+  }, true);
+  tables.chord = () => [["Family", "Family", "Observations"], links.map(l => [l.source, l.target, l.value])];
+}
+
+// ---------------------------------------------------------------- ontology
+function renderSchema() {
+  const cls = D.schema.classes, layerOf = c => S.classLayer[c] || "Core";
+  const rel = D.schema.relations.filter(([s, t, d]) => (state.schProv || (S.typeGroup[t] || "content") !== "provenance") && state.groups.has(S.typeGroup[t] || "content") || (state.schProv && (S.typeGroup[t] === "provenance")));
+  const used = new Set(); rel.forEach(([s, t, d]) => { used.add(s); used.add(d); });
+  if (!state.schProv) for (const c of ["CollectionRun", "DetectionRun", "ModelAgent"]) used.delete(c);
+  const nodes = [...used].filter(c => cls[c] != null || S.classLayer[c]);
+  const maxC = Math.max(1, ...nodes.map(c => cls[c] || 0));
+  const agg = new Map(); for (const [s, t, d, n] of rel) { if (!used.has(s) || !used.has(d)) continue; const k = `${s}|${t}|${d}`; agg.set(k, (agg.get(k) || 0) + n); }
+  const links = [...agg].map(([k, n]) => { const [s, t, d] = k.split("|"); return {source: s, target: d, value: n, rel: t,
+    label: {show: true, formatter: t.replaceAll("_", " ").toLowerCase(), color: T.ink2, fontSize: 9, backgroundColor: T.surface, padding: [1, 3], borderRadius: 3},
+    lineStyle: {color: groupColor(S.typeGroup[t] || "content"), width: 1 + Math.log10(n + 1), opacity: 0.7, curveness: s === d ? 0.6 : 0.2}}; });
+  if (state.schSub) for (const c of nodes) { const p = (D.hierarchyIndex ||= indexHierarchy())[c]; if (p && used.has(p) && p !== c)
+    links.push({source: c, target: p, rel: "subClassOf", symbol: ["none", "triangle"], symbolSize: 9,
+      label: {show: false}, lineStyle: {type: [5, 4], color: T.muted, width: 1.2, opacity: 0.9, curveness: 0}}); }
+  const layers = ["Core", "Content", "Network", "Economy", "Derived", "Provenance"];
+  chart("schema").setOption({
+    tooltip: {...tooltipBase(), formatter: p => p.dataType === "edge" ? (p.data.rel === "subClassOf" ? `${esc(p.data.source)} <i>subClassOf</i> ${esc(p.data.target)}`
+      : `<b>${esc(p.data.rel)}</b><br>${esc(p.data.source)} → ${esc(p.data.target)}<br>${fmt(p.data.value)} edges`) :
+      `<b>${esc(p.name)}</b><br><span style="color:${T.ink2}">${esc(layerOf(p.name))} layer</span><br>${fmt(cls[p.name] || 0)} instances`},
+    series: [{type: "graph", layout: "force", roam: true, draggable: true, top: 6, bottom: 6,
+      force: nodes.length > 25 ? {repulsion: 260, edgeLength: [55, 130], gravity: 0.22, friction: 0.2}
+                               : {repulsion: 520, edgeLength: [90, 190], gravity: 0.1, friction: 0.2}, zoom: 0.9, scaleLimit: {min: 0.3, max: 4},
+      edgeSymbol: ["none", "arrow"], edgeSymbolSize: 6, emphasis: {focus: "adjacency"},
+      labelLayout: {hideOverlap: true},
+      data: nodes.map(c => ({name: c, symbol: "circle", symbolSize: 18 + 34 * Math.sqrt((cls[c] || 0) / maxC),
+        itemStyle: {color: slotColor(S.layerSlot[layerOf(c)] ?? 0), borderColor: T.surface, borderWidth: 2},
+        label: {show: true, color: T.ink, fontSize: 11, textBorderColor: T.surface, textBorderWidth: 3}})),
+      links}],
+  }, true);
+  document.getElementById("layer-legend").replaceChildren(...layers.map(l => el("span", {}, el("span", {class: "dot", style: `width:9px;height:9px;border-radius:50%;background:${slotColor(S.layerSlot[l] ?? 0)}`}), l)),
+    el("span", {}, el("span", {class: "ln dash"}), "subClassOf"));
+}
+function indexHierarchy() { const idx = {}; const walk = (n, parent) => { if (parent && !["Core", "Content", "Network", "Economy", "Derived", "Provenance"].includes(parent)) idx[n.name] = parent; (n.children || []).forEach(k => walk(k, n.name)); };
+  D.hierarchy.forEach(r => walk(r, null)); return idx; }
+function renderHier() {
+  const prune = n => { const kids = (n.children || []).map(prune).filter(Boolean); if (!state.hierAll && !n.total) return null;
+    return {name: n.name, value: Math.max(n.total, state.hierAll ? 1 : 0), own: n.own, layer: n.layer, doc: n.doc, align: n.align,
+      itemStyle: {color: slotColor(S.layerSlot[n.layer] ?? 0)}, children: kids.length ? kids : undefined}; };
+  const data = D.hierarchy.map(prune).filter(Boolean);
+  chart("hier").setOption({
+    tooltip: {...tooltipBase(), formatter: p => `<b>${esc(p.name)}</b><br>${fmt(p.data.own || 0)} direct · ${fmt(p.value)} incl. subclasses` +
+      (p.data.align?.length ? `<br><span style="color:${T.ink2}">${esc(p.data.align.join(", "))}</span>` : "") + (p.data.doc ? `<br><span style="color:${T.muted}">${esc(p.data.doc)}</span>` : "")},
+    series: [{type: "sunburst", radius: ["14%", "94%"], sort: undefined, nodeClick: "rootToNode", data,
+      itemStyle: {borderColor: T.surface, borderWidth: 2, borderRadius: 4},
+      levels: [{}, {r0: "14%", r: "34%", label: {rotate: "tangential", fontWeight: 600, minAngle: 18}}, {r0: "34%", r: "62%", itemStyle: {opacity: 0.85}}, {r0: "62%", r: "94%", itemStyle: {opacity: 0.65}, label: {fontSize: 10}}],
+      label: {color: T.ink, fontSize: 11, minAngle: 14, rotate: "tangential", textBorderColor: T.surface, textBorderWidth: 2, overflow: "truncate"},
+      emphasis: {focus: "ancestor"}}],
+  }, true);
+  const rows = []; const walk = (n, path) => { rows.push([path.concat(n.name).join(" › "), n.own, n.total]); (n.children || []).forEach(k => walk(k, path.concat(n.name))); };
+  data.forEach(r => walk({...r, total: r.value}, []));
+  tables.hier = () => [["Class", "Direct instances", "Incl. subclasses"], rows];
+}
+
+// ---------------------------------------------------------------- activity
+const A = D.activity, dayMs = A.days.map(d => Date.parse(d + "T00:00:00Z"));
+function renderTimeline() {
+  if (!A.days.length) { document.getElementById("timeline").replaceChildren(el("p", {class: "empty", text: "No dated messages in this store."})); return; }
+  const c = chart("timeline"), slots = [1, 2, 3, 4, 5, 0];
+  c.setOption({
+    grid: {left: 44, right: 14, top: 36, bottom: 64},
+    legend: {top: 0, left: 0, itemWidth: 16, itemHeight: 2, icon: "rect", textStyle: {color: T.ink2, fontSize: 12}, inactiveColor: T.axis},
+    tooltip: {...tooltipBase(), trigger: "axis", axisPointer: {type: "line", lineStyle: {color: T.axis}},
+      formatter: ps => `<div style="font-weight:600;margin-bottom:4px">${esc(ps[0].axisValueLabel)}</div>` + ps.filter(p => p.value).map(p => tipRow(p.color, fmt(p.value), p.seriesName)).join("") || "no messages"},
+    xAxis: {type: "category", data: A.days, boundaryGap: false, ...axisBase(), splitLine: {show: false}},
+    yAxis: {type: "value", ...axisBase(), minInterval: 1, axisLabel: {color: T.muted, formatter: v => fmt(v)}},
+    dataZoom: [{type: "slider", height: 22, bottom: 10, borderColor: T.ring, backgroundColor: T.surface2, fillerColor: "rgba(127,127,127,.12)",
+      dataBackground: {lineStyle: {color: T.axis}, areaStyle: {color: T.grid}}, textStyle: {color: T.muted}, handleStyle: {color: T.surface, borderColor: T.axis}},
+      {type: "inside"}],
+    series: A.series.map((s, i) => ({name: s.name, type: "line", stack: "all", smooth: 0.25, symbol: "none", data: s.data,
+      lineStyle: {width: 2, color: slotColor(slots[i] ?? 0)}, itemStyle: {color: slotColor(slots[i] ?? 0)},
+      areaStyle: {color: slotColor(slots[i] ?? 0), opacity: 0.12}, emphasis: {focus: "series"}})),
+  }, true);
+  c.off("datazoom"); c.on("datazoom", () => {
+    const o = c.getOption().dataZoom[0], n = A.days.length;
+    const i0 = o.startValue ?? Math.round((o.start / 100) * (n - 1)), i1 = o.endValue ?? Math.round((o.end / 100) * (n - 1));
+    state.time = (i0 <= 0 && i1 >= n - 1) ? null : [dayMs[i0] / 1000, dayMs[i1] / 1000 + 86399];
+    clearTimeout(c._t); c._t = setTimeout(() => { renderNetwork(); if (state.selected) showDetails(state.selected); }, 120);
+  });
+  tables.timeline = () => [["Day", ...A.series.map(s => s.name)], A.days.map((d, i) => [d, ...A.series.map(s => s.data[i])])];
+}
+function renderHeat() {
+  if (!A.heat.length) return;
+  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], max = Math.max(...A.heat.map(h => h[2]));
+  chart("heat").setOption({
+    grid: {left: 40, right: 10, top: 8, bottom: 56},
+    tooltip: {...tooltipBase(), formatter: p => `<b>${fmt(p.data[2])}</b> messages<br><span style="color:${T.ink2}">${days[p.data[1]]} ${String(p.data[0]).padStart(2, "0")}:00 UTC</span>`},
+    xAxis: {type: "category", data: [...Array(24).keys()].map(h => String(h).padStart(2, "0")), ...axisBase(), splitLine: {show: false}, axisLabel: {color: T.muted, interval: 3, fontSize: 10}},
+    yAxis: {type: "category", data: days, ...axisBase(), splitLine: {show: false}, inverse: true},
+    visualMap: {min: 0, max, calculable: false, orient: "horizontal", left: "center", bottom: 4, itemWidth: 10, itemHeight: 120,
+      inRange: {color: T.seq.slice(0, 6)}, textStyle: {color: T.muted, fontSize: 11}, text: ["more", "fewer"]},
+    series: [{type: "heatmap", data: A.heat, itemStyle: {borderColor: T.surface, borderWidth: 2, borderRadius: 3}, emphasis: {itemStyle: {borderColor: T.ink, borderWidth: 1}}}],
+  }, true);
+  tables.heat = () => [["Weekday", "Hour (UTC)", "Messages"], A.heat.map(h => [days[h[1]], h[0], h[2]]).sort((a, b) => days.indexOf(a[0]) - days.indexOf(b[0]) || a[1] - b[1])];
+}
+
+// ---------------------------------------------------------------- evidence quality
+function renderQuality() {
+  const by = {}; for (const [sf, t, df, st, b, n] of flows()) { const g = S.typeGroup[t] || "content"; (by[g] ||= {})[st] = (by[g][st] || 0) + n; }
+  const groups = Object.keys(by).sort((a, b) => Object.values(by[a]).reduce((x, y) => x + y, 0) - Object.values(by[b]).reduce((x, y) => x + y, 0));
+  const sts = S.statuses.filter(s => state.status.has(s) && groups.some(g => by[g][s]));
+  chart("quality").setOption({
+    grid: {left: 150, right: 24, top: 30, bottom: 24},
+    legend: {top: 0, left: 0, icon: "roundRect", itemWidth: 10, itemHeight: 10, textStyle: {color: T.ink2, fontSize: 12}, inactiveColor: T.axis},
+    tooltip: {...tooltipBase(), trigger: "axis", axisPointer: {type: "shadow", shadowStyle: {color: "rgba(127,127,127,.08)"}},
+      formatter: ps => `<div style="font-weight:600;margin-bottom:4px">${esc(ps[0].axisValueLabel)}</div>` + ps.filter(p => p.value).map(p => tipRow(p.color, fmt(p.value), p.seriesName, p.seriesName !== "Observed")).join("")},
+    xAxis: {type: "value", ...axisBase(), axisLabel: {color: T.muted, formatter: v => fmt(v)}},
+    yAxis: {type: "category", data: groups.map(g => S.groups[g]?.name || g), ...axisBase(), splitLine: {show: false}, axisLabel: {color: T.ink2, fontSize: 12}},
+    series: sts.map((s, i) => ({name: STATUS_NAME[s], type: "bar", stack: "s", barMaxWidth: 22, data: groups.map(g => by[g][s] || 0),
+      itemStyle: {color: slotColor(STATUS_SLOT[s]), borderColor: T.surface, borderWidth: 1, borderRadius: i === sts.length - 1 ? [0, 4, 4, 0] : 0}, emphasis: {focus: "series"}})),
+  }, true);
+  tables.quality = () => [["Relation group", ...sts.map(s => STATUS_NAME[s])], groups.map(g => [S.groups[g]?.name || g, ...sts.map(s => by[g][s] || 0)])];
+}
+function renderConf() {
+  const bins = Array(10).fill(0);
+  for (const [sf, t, df, st, b, n] of flows()) if (st !== "observed") bins[b] += n;
+  const labels = bins.map((_, i) => `${(i / 10).toFixed(1)}–${((i + 1) / 10).toFixed(1)}`);
+  chart("conf").setOption({
+    grid: {left: 44, right: 12, top: 18, bottom: 34},
+    tooltip: {...tooltipBase(), trigger: "item", formatter: p => `<b>${fmt(p.value)}</b> derived edges<br><span style="color:${T.ink2}">confidence ${esc(p.name)}</span>`},
+    xAxis: {type: "category", data: labels, ...axisBase(), splitLine: {show: false}, axisLabel: {color: T.muted, fontSize: 10, interval: 1}},
+    yAxis: {type: "value", ...axisBase(), minInterval: 1, axisLabel: {color: T.muted, formatter: v => fmt(v)}},
+    series: [{type: "bar", data: bins, barMaxWidth: 24, itemStyle: {color: slotColor(2), borderRadius: [4, 4, 0, 0]},
+      label: {show: true, position: "top", color: T.ink2, fontSize: 11, formatter: p => p.value ? fmt(p.value) : ""}}],
+  }, true);
+  tables.conf = () => [["Confidence", "Derived edges"], labels.map((l, i) => [l, bins[i]])];
+}
+
+// ---------------------------------------------------------------- findings
+function renderRules() {
+  const rows = D.rules.slice().sort((a, b) => ({violation: 0, warning: 1, info: 2}[a[1]] - {violation: 0, warning: 1, info: 2}[b[1]]) || b[2] - a[2]).slice(0, 12);
+  const sevColor = {violation: T.critical, warning: T.warning, info: T.s[1]};
+  const k = D.kpi; document.getElementById("rules-sub").textContent = `${k.violations} violations · ${k.warnings} warnings · info = typed gaps (absence is data)`;
+  chart("rules").setOption({
+    grid: {left: 170, right: 36, top: 6, bottom: 20},
+    tooltip: {...tooltipBase(), formatter: p => `<b>${esc(p.name)}</b><br>${fmt(p.value)} finding${p.value > 1 ? "s" : ""} · ${esc(rows[p.dataIndex][1])}`},
+    xAxis: {type: "value", ...axisBase(), minInterval: 1},
+    yAxis: {type: "category", inverse: true, data: rows.map(r => r[0]), ...axisBase(), splitLine: {show: false},
+      axisLabel: {color: T.ink2, fontSize: 11, width: 160, overflow: "truncate"}},
+    series: [{type: "bar", barMaxWidth: 16, data: rows.map(r => ({value: r[2], itemStyle: {color: sevColor[r[1]], borderRadius: [0, 4, 4, 0]}})),
+      label: {show: true, position: "right", color: T.ink2, fontSize: 11, formatter: p => `${p.value} ${rows[p.dataIndex][1]}`}}],
+  }, true);
+  tables.rules = () => [["Rule", "Severity", "Findings"], rows];
+}
+function table(cols, rows, onRow) {
+  const t = el("table", {class: "data"}), thead = el("thead"), tr = el("tr");
+  cols.forEach(c => tr.append(el("th", {text: c}))); thead.append(tr); t.append(thead);
+  const tb = el("tbody");
+  for (const r of rows) { const row = el("tr", onRow ? {class: "click"} : {});
+    for (const c of r.cells) row.append(c instanceof Node ? el("td", {}, c) : el("td", typeof c === "number" ? {class: "num", text: fmt(c)} : {text: String(c ?? "")}));
+    if (onRow) row.onclick = () => onRow(r.key); tb.append(row); }
+  t.append(tb); return t;
+}
+function meter(v) { return el("div", {style: "display:flex;align-items:center;gap:8px"}, el("div", {class: "meter"}, el("span", {style: `width:${Math.round(v * 100)}%`})), el("b", {text: v.toFixed(2)})); }
+function renderFindings() {
+  const cl = document.getElementById("clusters");
+  cl.replaceChildren(D.clusters.length ? table(["Group", "Kind", "Size", "Quality"], D.clusters.map(c => ({key: c.key, cells: [
+    el("div", {}, el("div", {text: c.name, style: "font-weight:600"}), el("div", {}, ...c.members.slice(0, 6).map(m => el("span", {class: "pill", text: m.name})), c.members.length > 6 ? el("span", {class: "pill", text: `+${c.members.length - 6}`}) : null)),
+    c.kind.replace("Cluster", ""), c.size, c.stability != null ? (+c.stability).toFixed(2) : c.quality != null ? (+c.quality).toFixed(2) : "–"]})), focusNode)
+    : el("p", {class: "empty", text: "No inferred groups."}));
+  const id = document.getElementById("identity"), J = {positive: "merged (positive)", negative: "cannot-link", unsure: "unsure", no_judgement: "awaiting analyst"};
+  id.replaceChildren(D.identity.length ? table(["Accounts", "Score", "Judgement"], D.identity.map(c => ({key: c.a, cells: [
+    el("div", {}, el("div", {text: `${c.an}  ↔  ${c.bn}`, style: "font-weight:600"}), el("div", {}, ...(c.features || []).map(f => el("span", {class: "pill", text: f.replaceAll("_", " ")})))),
+    meter(c.score), J[c.judgement] || c.judgement]})), focusNode) : el("p", {class: "empty", text: "No identity candidates."}));
+  const ids = document.getElementById("idents");
+  ids.replaceChildren(D.top_identifiers.length ? table(["Identifier", "Type", "Mentions"], D.top_identifiers.map(i => ({key: i.key, cells: [i.name, i.cls, i.n]})), focusNode) : el("p", {class: "empty", text: "No identifiers found."}));
+  const ch = document.getElementById("chats");
+  ch.replaceChildren(D.top_chats.length ? table(["Chat", "Messages"], D.top_chats.map(i => ({key: i.key, cells: [i.name, i.n]})), focusNode) : el("p", {class: "empty", text: "No messages."}));
+}
+
+// ---------------------------------------------------------------- table views (accessibility)
+const tables = {};
+document.querySelectorAll(".card[data-table]").forEach(card => {
+  const b = card.querySelector(".tv"); if (!b) return; b.setAttribute("aria-pressed", "false");
+  b.onclick = () => { const on = !card.classList.contains("show-table"); card.classList.toggle("show-table", on); b.setAttribute("aria-pressed", String(on));
+    if (on) { const f = tables[card.dataset.table]; const box = card.querySelector(".tableview"); box.replaceChildren();
+      if (f) { const [cols, rows] = f(); box.append(table(cols, rows.map(r => ({cells: r})))); } }
+    else Object.values(charts).forEach(c => c.resize()); };
+});
+
+// ---------------------------------------------------------------- search
+(function search() {
+  const q = document.getElementById("q"), res = document.getElementById("q-res");
+  const idx = NET.nodes.map(n => ({id: n.id, name: n.name, fam: n.fam, hay: (n.name + " " + n.id).toLowerCase()}));
+  let active = -1, items = [];
+  const close = () => { res.hidden = true; active = -1; };
+  q.oninput = () => { const s = q.value.trim().toLowerCase(); res.replaceChildren(); if (!s) return close();
+    items = idx.filter(n => n.hay.includes(s)).slice(0, 12);
+    for (const [i, n] of items.entries()) { const li = el("li", {role: "option"}, el("span", {class: "dot", style: `width:9px;height:9px;border-radius:50%;background:${famColor(n.fam)}`}), n.name, el("small", {text: FAM(n.fam)}));
+      li.onmousedown = e => { e.preventDefault(); pick(i); }; res.append(li); }
+    res.hidden = !items.length; };
+  const pick = i => { if (!items[i]) return; q.value = items[i].name; close(); focusNode(items[i].id); };
+  q.onkeydown = e => { if (res.hidden) return; if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); active = (active + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+      [...res.children].forEach((li, i) => li.classList.toggle("active", i === active)); } else if (e.key === "Enter") pick(Math.max(0, active)); else if (e.key === "Escape") close(); };
+  q.onblur = () => setTimeout(close, 100);
+})();
+
+// ---------------------------------------------------------------- wiring
+function update() { renderNetwork(); renderSankey(); renderChord(); renderSchema(); renderQuality(); renderConf(); if (state.selected) showDetails(state.selected); }
+function renderAll() { readTokens(); renderHeader(); renderKpis(); renderFilters(); update(); renderHier(); renderTimeline(); renderHeat(); renderRules(); renderFindings(); }
+const toggle = (id, key, fn) => { const b = document.getElementById(id); b.onclick = () => { state[key] = !state[key]; b.setAttribute("aria-pressed", String(state[key])); fn(); }; };
+toggle("net-labels", "labels", renderNetwork); toggle("sch-sub", "schSub", renderSchema); toggle("sch-prov", "schProv", renderSchema); toggle("hier-all", "hierAll", renderHier);
+document.getElementById("net-reset").onclick = () => { state.selected = null; chart("network").dispatchAction({type: "restore"}); chart("network").clear(); renderNetwork();
+  document.getElementById("details").replaceChildren(el("p", {class: "empty", text: "Click a node to see its properties and every relation, or search above."})); };
+chart("network").on("click", p => { if (p.dataType === "node") showDetails(p.data.id); });
+function setTheme(t) { try { localStorage.setItem("tgo-dash-theme", t); } catch (e) {} document.documentElement.dataset.theme = t;
+  Object.values(charts).forEach(c => c.dispose()); for (const k in charts) delete charts[k];
+  chart("network").on("click", p => { if (p.dataType === "node") showDetails(p.data.id); }); renderAll(); }
+document.getElementById("theme").onclick = () => { const dark = getComputedStyle(document.documentElement).colorScheme.includes("dark"); setTheme(dark ? "light" : "dark"); };
+try { const t = localStorage.getItem("tgo-dash-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+renderAll();
+if (location.hash.startsWith("#/node/")) { const id = decodeURIComponent(location.hash.slice(7)); if (nodeById.has(id)) setTimeout(() => focusNode(id), 300); }
+let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => Object.values(charts).forEach(c => c.resize()), 120); });
+</script>
+</body>
+</html>

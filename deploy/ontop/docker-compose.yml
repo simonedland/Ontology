@@ -1,0 +1,19 @@
+# Optional: SPARQL over the TGO DuckDB store (virtual knowledge graph; no triples are materialised).
+# 1. python -m tgo ontop --out <out>            (writes <out>/ontop/{tgo.obda, tgo.properties, ontology.ttl})
+# 2. put duckdb_jdbc-<ver>.jar (Maven org.duckdb:duckdb_jdbc, MIT; match your duckdb version) in ./jdbc
+# 3. TGO_OUT=<out> docker compose up -d     ->  http://127.0.0.1:8080/sparql  (Ontop UI at /)
+# Air-gapped: docker save/load the pinned image; the JDBC jar is the only other file. The store is opened
+# read-only (DuckDB allows one writer per file, so do not run the pipeline against it while serving).
+services:
+  ontop:
+    image: ontop/ontop@sha256:d19a2055b02812c8ecc0a00cca1733c1669c4143dfeb728acbfdff92b45e94d7   # Apache-2.0, pinned
+    environment:
+      ONTOP_ONTOLOGY_FILE: /opt/ontop/input/ontology.ttl
+      ONTOP_MAPPING_FILE: /opt/ontop/input/tgo.obda
+      ONTOP_PROPERTIES_FILE: /opt/ontop/input/tgo.properties
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ${TGO_OUT:?set TGO_OUT}:/data:ro
+      - ${TGO_OUT}/ontop:/opt/ontop/input:ro
+      - ./jdbc:/opt/ontop/jdbc:ro

@@ -79,6 +79,7 @@ ELEVATED_SCOPES = {Scope.ADMINS.value, Scope.OWNER_ONLY.value}
 
 @dataclass(frozen=True)
 class ClassDef:
+    """A TGO class: parents, external alignments, layer, default epistemic status, viewer family."""
     name: str
     parents: tuple[str, ...] = ()
     align: tuple[str, ...] = ()
@@ -174,6 +175,7 @@ CLASSES: dict[str, ClassDef] = {c.name: c for c in _CLASS_LIST}
 
 
 def ancestors(label: str) -> list[str]:
+    """All (transitive) superclasses of ``label``."""
     out, stack = [], [label]
     while stack:
         cur = stack.pop()
@@ -201,6 +203,7 @@ def family(labels) -> str:
 # --------------------------------------------------------------------------
 @dataclass(frozen=True)
 class RelDef:
+    """A TGO relationship type: observability tier, default status, colour, FtM / RDF mapping."""
     name: str
     tier: str            # structural | viewer_only | pairwise | admin_only | derived | provenance
     status: str          # default epistemic status

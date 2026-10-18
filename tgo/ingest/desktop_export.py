@@ -48,9 +48,14 @@ def _fallback_label(g: Graph, key: str, label: str | None, *labels: str) -> None
     """Export display names for *other* users are the collector's contact names
     (viewer-relative), so they never overwrite an account's self-presented name."""
     g.node(key, *labels)
-    if label and not g.nodes[key].props.get("label"):
-        g.nodes[key].props["label"] = label
-        g.nodes[key].props["labelSource"] = "desktop_export (collector-scoped display name)"
+    if not label:
+        return
+    if key.startswith("user:"):
+        # the collector's contact name for this user: kept separately so no merge order (in-memory or
+        # across DuckDB batches) can ever turn it into the account's own label
+        g.nodes[key].props["collectorDisplayName"] = label
+    elif not g.nodes[key].props.get("label"):
+        g.nodes[key].props["label"] = label   # chat/channel titles in the export are the real titles
 
 
 def _excluded(path) -> bool:
@@ -68,6 +73,7 @@ def _excluded_status(path: str) -> str:
 
 
 class DesktopExportIngester:
+    """Adapter for a Telegram Desktop ``result.json`` export (see module docs for quirks handled)."""
     def __init__(self, g: Graph, result_json: Path):
         self.g = g
         self.path = Path(result_json)
@@ -76,12 +82,17 @@ class DesktopExportIngester:
         pi = self.data.get("personal_information") or {}
         self.collector_key = K.user(pi["user_id"]) if pi.get("user_id") else None
 
-    def run(self) -> str:
+    def activity(self):
+        """The CollectionRun context for this export (same run key for every batch)."""
         rid = run_id(self.path.resolve(), self.path.stat().st_size)
-        with self.g.activity("CollectionRun", f"export:{rid}", agent={
-                "tool": "telegram-desktop-export", "version": "json", "codeLicense": "GPL-3.0 (tdesktop)",
-                "weightsLicense": "n/a"}, source="DesktopExport", collector=self.collector_key,
-                file=str(self.path.name)) as run:
+        return self.g.activity("CollectionRun", f"export:{rid}", agent={
+            "tool": "telegram-desktop-export", "version": "json", "codeLicense": "GPL-3.0 (tdesktop)",
+            "weightsLicense": "n/a"}, source="DesktopExport", collector=self.collector_key,
+            file=str(self.path.name))
+
+    def run(self) -> str:
+        """Ingest the whole export into ``self.g`` (in-memory engine)."""
+        with self.activity() as run:
             self._personal()
             self._contacts()
             for chat in (self.data.get("chats") or {}).get("list", []):
@@ -147,11 +158,20 @@ class DesktopExportIngester:
 
     # ----------------------------------------------------------------- chats
     def _chat(self, chat: dict, left: bool = False) -> None:
+        head = self.chat_header(chat, left)
+        if head is None:
+            return
+        ckey, names = head
+        for m in chat.get("messages", []):
+            self._message(ckey, m, names)
+
+    def chat_header(self, chat: dict, left: bool = False) -> tuple[str, dict[str, str]] | None:
+        """Write the chat node (+ collector membership); return ``(chat key, display-name -> from_id)``."""
         g = self.g
         ns, cls, kind = CHAT_TYPES.get(chat.get("type"), ("chat", "Chat", "unknown"))
         cid = chat.get("id")
         if cid is None:
-            return
+            return None
         ckey = f"{ns}:{int(cid)}"
         if ns == "user":
             # a private chat is the conversation with that user
@@ -168,8 +188,7 @@ class DesktopExportIngester:
                 names[m["from"]] = m["from_id"]
             if m.get("actor") and m.get("actor_id"):
                 names[m["actor"]] = m["actor_id"]
-        for m in chat.get("messages", []):
-            self._message(ckey, m, names)
+        return ckey, names
 
     def _message(self, ckey: str, m: dict, names: dict[str, str]) -> None:
         g = self.g
@@ -276,4 +295,5 @@ class DesktopExportIngester:
 
 
 def ingest(g: Graph, result_json: str | Path) -> str:
+    """Ingest one ``result.json`` into ``g``; returns the CollectionRun key."""
     return DesktopExportIngester(g, Path(result_json)).run()

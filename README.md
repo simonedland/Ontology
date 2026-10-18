@@ -26,6 +26,7 @@ RDF/Turtle, Neo4j, FtM (OpenAleph), STIX 2.1 (OpenCTI) and GEXF (Gephi). The who
 ```bash
 pip install -e .                 # core deps: networkx, pillow, numpy, scipy
 python -m tgo demo --open        # synthetic data -> full pipeline -> out/demo/report.html
+python -m tgo demo --dashboard   # ... plus out/demo/dashboard.html, the interactive overview
 ```
 
 To run it on real data:
@@ -47,6 +48,21 @@ set TG_API_ID=... & set TG_API_HASH=...      # or --api-id/--api-hash
 python -m tgo collect --target @somechannel --limit 500 --out data/case/mtproto
 ```
 
+## Documentation
+
+| Read this | When you want to… |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | understand how the pieces fit together and where to make a change |
+| [docs/configuration.md](docs/configuration.md) | tune thresholds, weights and caps (`--config tgo.toml`), or set the namespace and model paths |
+| [docs/extending.md](docs/extending.md) | add a source, extractor, analysis step, relation type, validation rule, export format or viewer tab |
+| [examples/](examples/README.md) | copy a working plugin template (CSV source, watchlist extractor, analysis step, SQL step, CSV exporter) |
+| [docs/scaling.md](docs/scaling.md) | run, tune and query the DuckDB engine for millions of entries |
+| [docs/dashboard.md](docs/dashboard.md) | explore a store visually: relation network, flows, ontology, activity, evidence quality (`tgo dashboard`) |
+| [docs/data-model.md](docs/data-model.md) | consume TGO output: node and edge shapes, key formats, input and output file contracts |
+| [docs/vocabulary.md](docs/vocabulary.md) | look up any class or relation (generated from `tgo/ontology.py`) |
+| [docs/offline.md](docs/offline.md) | run air-gapped, add local AI models, or check the no-network guarantee |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | set up a dev environment, run the tests and CI, re-pin vendored JS, release |
+
 ## What's in the box
 
 | Module | Role |
@@ -66,6 +82,7 @@ python -m tgo collect --target @somechannel --limit 500 --out data/case/mtproto
 | `tgo/analysis/identity.py` | nomenklatura-style judgements. A noisy-OR over **non-biometric** evidence with IDF down-weighting produces `no_judgement` candidates. Only analysts (or an explicit auto-accept policy) say `positive`, which mints a `PersonCluster`. `negative` acts as a cannot-link. `explode()` un-merges. |
 | `tgo/validate.py` | Guardrails as code: derived provenance, no `sameAs` and no biometrics, person only by judgement, stable keys, no EXIF on photo-mode media, Art. 9 memberships, admin-only sensitivity, sticker ownership, viewer-relative facts, typed-gap inventory. |
 | `tgo/export/` | Turtle (TBox + ABox; derived edges reified as `tg:Assertion`, memberships as `org:Membership`), FtM JSONL, STIX 2.1 bundle, Neo4j Cypher MERGE script, GEXF 1.3 with positions and timeline. |
+| `tgo/dashboard/` | `dashboard.html`: an offline ECharts overview of a whole store (either engine). Relation network with message-level facts projected onto actors, Sankey flows, chord, VOWL-style schema graph, class sunburst, activity, evidence quality, findings; global filters and table views. |
 | `tgo/viz/` | A self-contained offline `report.html` (Cytoscape.js inlined). Edge hue = relation group; solid, dashed or dotted line = observed, inferred or file-declared; opacity = confidence; width = event count. The "explain this edge" panel shows evidence messages, runs, tools, versions and licences. Tabs: coordination raster, identity judgements, media gallery (blurred avatars, waveforms, transcripts, EXIF, metadata), guardrails and coverage, ontology. |
 | `tgo/demo/synth.py` | A fully fictional dataset that plants every scenario (below). |
 
@@ -127,6 +144,7 @@ pip install --no-index --find-links wheelhouse "tgo[all]"
 | File | Contents |
 |---|---|
 | `report.html` | Interactive investigation viewer (single file) |
+| `dashboard.html` | Interactive data dashboard: relation network, flows, ontology, activity, evidence quality (with `--dashboard`; see [docs/dashboard.md](docs/dashboard.md)) |
 | `graph.json` | The full property graph: nodes, edges, provenance and field visibility |
 | `ontology.ttl` / `tgo.ttl` | TBox / ABox in Turtle |
 | `neo4j.cypher` | MERGE script with a uniqueness constraint |
@@ -135,9 +153,65 @@ pip install --no-index --find-links wheelhouse "tgo[all]"
 | `graph.gexf` | GEXF 1.3 with positions and timeline for Gephi |
 | `validation.json`, `summary.json` | Guardrail findings, counts, timings |
 
-## Scale
+## Scale: millions of entries
 
-On a laptop, 23k messages from 60 channels (88k edges) run end to end, including every export and the viewer, in about 13 s. Coordination and near-duplicate search use a sliding time window and a pigeonhole band index rather than all-pairs. Above a few thousand nodes, the layout is computed on the actor skeleton only. The HTML viewer embeds at most 6,000 nodes: all actors and derived nodes, plus every message cited as evidence. The full graph always stays in `graph.json`, `neo4j.cypher` and `graph.gexf`. For millions of elements, move storage to Neo4j or Fabric Graph and rendering to sigma.js or cosmos.gl, as the design doc recommends. The graph API stays the same.
+TGO has two engines with **identical semantics**. A parity test asserts that both produce the same edges, confidences, counts, labels and field-visibility records.
+
+| | `memory` engine | `duckdb` engine (`tgo.scale`) |
+|---|---|---|
+| For | single cases, up to roughly 100k messages | corpora of millions to tens of millions of messages |
+| Store | Python `Graph` | DuckDB file (`tgo.duckdb`) + Parquet |
+| Ingest | whole input | streamed batches (`batch_size`), process pool (`workers`), Arrow inserts, flat memory |
+| Merge | MERGE on write | append-only staging → incremental GROUP BY finalize (watermark, single-row fast path, stable dense int64 ids) |
+| Coordination | windowed pairs in Python | SQL equi-join on (object, time bucket) ± 1 bucket, first-share dedupe, object fan-out cap, Poisson null model |
+| Near-dup text | SimHash window scan | 4 × 16-bit SimHash block joins (pigeonhole, k ≤ 3) |
+| Near-dup images | band index | Faiss binary HNSW k-NN + radius filter |
+| Communities | NetworkX Louvain | NetworKit PLM (parallel Louvain), multi-seed stability |
+| Identity | Python | SQL pair generation with an evidence-key degree cap and IDF |
+| Exports | Turtle, Cypher, FtM, STIX, GEXF | partitioned Parquet, `neo4j-admin import` CSVs (integer ids), gzipped N-Triples, plus FtM/STIX/GEXF/viewer for a bounded **case slice** |
+
+```bash
+pip install -e ".[scale]"           # duckdb (<2), pyarrow, networkit, faiss-cpu: all MIT/Apache
+python -m tgo run --input corpus --out out/corpus --engine duckdb --workers -1
+python scripts/gen_bench.py out/bench1m --messages 1000000   # reproducible fictional corpus with planted rings
+```
+
+`--engine auto` (the default) switches to DuckDB when the input exceeds `scale.auto_engine_bytes` (200 MB). Run `tgo config` to see every knob: batch size, workers, DuckDB threads, memory limit and spill directory, fan-out caps, viewer cap.
+
+**Measured** on a 12-core Windows laptop with the fictional `gen_bench.py` corpus (Zipf-skewed channels, popular URLs, forwards, group chatter, plus planted coordination rings):
+
+| Messages | Corpus nodes / edges | Wall time (end to end) | Peak RAM (all processes) | Planted rings recovered |
+|---|---|---|---|---|
+| 1,000,000 | 1.26 M / 2.85 M | 100 s | 5.1 GB | 5 / 5 exact, no false clusters |
+| 10,000,000 | 12.0 M / 28.8 M | 46 min (15 GB laptop, spilling to disk) | 18.6 GB incl. workers | 8 / 8 exact, 0 violations |
+
+### Which storage fits: deployment tiers (researched October 2026)
+
+**There is no database server or Docker container by default.** The system of record is an **embedded DuckDB file plus Parquet**, which runs in-process, offline, on Windows and Linux, MIT-licensed. Servers are optional, rebuildable *views* fed from the same exports:
+
+| Tier | When | What | Status in this repo |
+|---|---|---|---|
+| 1. Embedded lakehouse (default) | up to ~10⁸ edges on one workstation | DuckDB file + partitioned Parquet; NetworKit/Faiss for algorithms | `tgo run --engine duckdb` (benchmarked below) |
+| 2. Ontology/SPARQL view | ontology-aligned queries without copying data | **Ontop** virtual knowledge graph (Apache-2.0) translating SPARQL to SQL over `tgo.duckdb` (read-only) | `tgo ontop --out DIR` + `deploy/ontop/` (pinned image; verified with live SPARQL) |
+| 3. Interactive graph server | multi-analyst exploration from ~3×10⁸ to 10⁹+ edges | **Neo4j 5.26 LTS** in Docker on an on-prem Linux host, bulk-loaded with `neo4j-admin import` from `out/neo4j/`; ~120–200 GB store and 128–256 GB RAM per 10⁹ edges (research estimate) | `deploy/neo4j/` (digest-pinned, telemetry off, localhost-bound; import and Cypher verified) |
+| Microsoft Fabric | sanitised aggregates and Power BI only | OneLake from the Parquet export; Fabric Graph is SaaS-only (no air-gap), ≤2B elements, read-only GQL | Parquet export is compatible |
+
+Why this mix:
+- **Neo4j Community** is GPLv3. Neo4j **Enterprise** is needed if the database itself must enforce per-field privacy visibility (property-level RBAC).
+- **Not chosen:**
+  - Memgraph: in-memory, about 150 GB+ RAM per 10⁹ edges, BSL licence.
+  - ArangoDB: 100 GB cap. TigerGraph: 200 GB cap.
+  - FalkorDB: SSPL.
+  - GraphDB Free: non-commercial use only.
+  - Fabric Graph: not available offline.
+- **LadybugDB** (MIT, the Kùzu fork) is a promising embedded Cypher layer over Parquet, but the project is young.
+- **RDF 1.2 triple terms** are still a W3C Candidate Recommendation. TGO therefore models edge provenance as n-ary `tg:Assertion` nodes, which works in every store today.
+
+Design notes (sources in `docs/`):
+- **DuckDB 1.5** is the system of record; pin `<2` until its new storage format settles. Merges never use per-row `ON CONFLICT`.
+- **Parquet** is the durable interchange format for Fabric/OneLake, Spark and Polars.
+- The browser never receives the corpus. The viewer gets a ranked case slice: derived structure first, then its evidence, then top actors.
+- At ~50M+ edges, move serving to Neo4j (bulk import) or Fabric Graph and overview rendering to cosmos.gl. The Parquet and adapter contracts stay the same.
 
 ## Tests
 

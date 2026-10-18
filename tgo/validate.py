@@ -16,6 +16,7 @@ from .graph import Graph
 
 @dataclass
 class Finding:
+    """One guardrail result: rule id, severity (violation / warning / info), subject, message."""
     rule: str
     severity: str
     subject: str
@@ -23,6 +24,7 @@ class Finding:
 
 
 def validate(g: Graph) -> list[Finding]:
+    """Run every guardrail over an in-memory graph."""
     F: list[Finding] = []
 
     def add(rule, sev, subj, msg):
@@ -114,6 +116,7 @@ def validate(g: Graph) -> list[Finding]:
 
 
 def summary(findings: list[Finding]) -> dict:
+    """Count findings per severity."""
     s = {"violation": 0, "warning": 0, "info": 0}
     for f in findings:
         s[f.severity] += 1
@@ -121,4 +124,5 @@ def summary(findings: list[Finding]) -> dict:
 
 
 def to_dicts(findings: list[Finding]) -> list[dict]:
+    """Findings as plain dicts (``validation.json``)."""
     return [asdict(f) for f in findings]

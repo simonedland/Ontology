@@ -117,6 +117,7 @@ def _attvalues(parent: ET.Element, props: dict, ids: dict[str, str], schema: dic
 
 
 def build(g: Graph, positions: dict[str, tuple[float, float]] | None = None) -> ET.ElementTree:
+    """Build the GEXF 1.3 ElementTree for ``g`` (see :func:`write_gexf`)."""
     ET.register_namespace("", NS)
     ET.register_namespace("viz", VIZ)
     positions = positions or {}

@@ -46,8 +46,9 @@ def _content(g: Graph, acct: str) -> set[str]:
     return out
 
 
-def _features(g: Graph) -> dict[str, dict[str, set[str]]]:
+def _features(g: Graph, strong=None, min_bio_len: int = 15) -> dict[str, dict[str, set[str]]]:
     """feature -> evidence key -> set(accounts)"""
+    strong = STRONG_IDENTIFIERS if strong is None else set(strong)
     feats: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
     accounts = [n.key for n in g.by_label("Account") if n.key.startswith("user:")]
     for a in accounts:
@@ -57,7 +58,7 @@ def _features(g: Graph) -> dict[str, dict[str, set[str]]]:
             for e in g.out_edges(c, "CAPTURED_WITH"):
                 feats["shared_device_serial"][e.dst].add(a)
             for e in g.out_edges(c, "CONTAINS_IDENTIFIER"):
-                if STRONG_IDENTIFIERS & g.nodes[e.dst].labels:
+                if strong & g.nodes[e.dst].labels:
                     feats["shared_identifier"][e.dst].add(a)
         for e in g.out_edges(a, "FEATURES"):
             feats["same_personal_channel"][e.dst].add(a)
@@ -66,7 +67,7 @@ def _features(g: Graph) -> dict[str, dict[str, set[str]]]:
         snaps = sorted(g.out_edges(a, "HAS_PROFILE"), key=lambda e: e.props.get("t_last", 0))
         if snaps:
             about = (g.nodes[snaps[-1].dst].props.get("about") or "").strip().lower()
-            if len(about) >= 15:
+            if len(about) >= min_bio_len:
                 feats["same_bio_text"]["bio:" + about].add(a)
         for av in g.out_edges(a, "HAS_AVATAR"):
             for fp in g.in_edges(av.dst, "FINGERPRINT_OF"):
@@ -80,8 +81,14 @@ def _features(g: Graph) -> dict[str, dict[str, set[str]]]:
     return feats
 
 
-def score_candidates(g: Graph, min_score: float = 0.3) -> list[dict]:
-    feats = _features(g)
+def score_candidates(g: Graph, min_score: float = 0.3, weights: dict[str, float] | None = None,
+                     strong_identifiers=None, min_bio_len: int = 15) -> list[dict]:
+    """Score account pairs by noisy-OR over shared non-biometric evidence (one vote per feature).
+
+    Returns ``[{source, target, score, features, evidence}]`` sorted by score, >= ``min_score``.
+    """
+    weights = WEIGHTS if weights is None else weights
+    feats = _features(g, strong_identifiers, min_bio_len)
     pair_ev: dict[tuple[str, str], list[tuple[str, str, float]]] = defaultdict(list)
     for feat, groups in feats.items():
         for ev, accts in groups.items():
@@ -93,7 +100,7 @@ def score_candidates(g: Graph, min_score: float = 0.3) -> list[dict]:
             if feat == "shared_avatar_hash" and len(accts) > 3 and ev in g.nodes:
                 g.nodes[ev].props["hashClass"] = "high_degree"
             for a, b in combinations(sorted(accts), 2):
-                pair_ev[(a, b)].append((feat, ev, WEIGHTS[feat] * idf))
+                pair_ev[(a, b)].append((feat, ev, weights.get(feat, 0.0) * idf))
     cands = []
     for (a, b), evs in pair_ev.items():
         best: dict[str, float] = {}
@@ -110,21 +117,25 @@ def score_candidates(g: Graph, min_score: float = 0.3) -> list[dict]:
 
 
 class Resolver:
+    """nomenklatura-style judgement store on top of the graph (suggest / decide / merge / explode)."""
     def __init__(self, g: Graph):
         self.g = g
 
     @staticmethod
     def jkey(a: str, b: str) -> str:
+        """Deterministic IdentityJudgement key for an unordered account pair."""
         a, b = sorted((a, b))
         return f"judg:{a}|{b}"
 
     def cluster_of(self, acct: str) -> str | None:
+        """Active PersonCluster of ``acct`` (via OPERATED_BY), or None."""
         for e in self.g.out_edges(acct, "OPERATED_BY"):
             if not e.props.get("deletedAt"):
                 return e.dst
         return None
 
     def members(self, pc: str) -> set[str]:
+        """Accounts currently operated by person cluster ``pc``."""
         return {e.src for e in self.g.in_edges(pc, "OPERATED_BY") if not e.props.get("deletedAt")}
 
     def _negative(self, a: str, b: str) -> bool:
@@ -132,6 +143,7 @@ class Resolver:
         return bool(n and n.props.get("judgement") == "negative" and not n.props.get("deletedAt"))
 
     def suggest(self, a: str, b: str, score: float, features, evidence, decided_by: str) -> str:
+        """Record an algorithmic candidate (``no_judgement`` + score); never overrides a human decision."""
         a, b = sorted((a, b))
         jk = self.jkey(a, b)
         existing = self.g.nodes.get(jk)
@@ -147,6 +159,7 @@ class Resolver:
 
     def decide(self, a: str, b: str, judgement: str, decided_by: str, legal_basis: str | None = None,
                rationale: str | None = None) -> dict:
+        """Record an analyst/policy judgement; ``positive`` merges into a PersonCluster unless a cannot-link blocks it."""
         assert judgement in ("positive", "negative", "unsure", "no_judgement")
         a, b = sorted((a, b))
         jk = self.jkey(a, b)
@@ -204,14 +217,21 @@ class Resolver:
 
 
 def run(g: Graph, decisions: list[dict] | None = None, min_score: float = 0.3,
-        auto_accept: float | None = None) -> dict:
+        auto_accept: float | None = None, weights: dict[str, float] | None = None,
+        strong_identifiers=None, min_bio_len: int = 15) -> dict:
+    """Write scored candidates, apply the optional auto-accept policy, then analyst ``decisions``.
+
+    ``decisions`` = ``[{source, target, judgement, decidedBy, legalBasis?, rationale?}]``.
+    Parameters mirror :class:`tgo.config.IdentityConfig`.
+    """
+    weights = WEIGHTS if weights is None else weights
     res = Resolver(g)
     out = {"candidates": 0, "decisions": [], "auto_accepted": 0}
     with g.activity("DetectionRun", f"xref:noisy-or:min{min_score}", agent={
             "tool": "tgo-xref", "version": "0.1 (nomenklatura judgement model)", "codeLicense": "MIT",
-            "weightsLicense": "n/a"}, algorithm="noisy_or_evidence", weights=WEIGHTS, min_score=min_score,
+            "weightsLicense": "n/a"}, algorithm="noisy_or_evidence", weights=weights, min_score=min_score,
             auto_accept=auto_accept):
-        for c in score_candidates(g, min_score):
+        for c in score_candidates(g, min_score, weights, strong_identifiers, min_bio_len):
             res.suggest(c["source"], c["target"], c["score"], c["features"], c["evidence"], "tgo-xref:noisy-or")
             out["candidates"] += 1
             if auto_accept is not None and c["score"] >= auto_accept:

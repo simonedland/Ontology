@@ -37,6 +37,7 @@ def _jsonl(path: Path):
 
 
 class MTProtoIngester:
+    """Adapter for MTProto/Telethon ``to_dict()`` dumps (dispatch on constructor names)."""
     def __init__(self, g: Graph, root: Path):
         self.g = g
         self.root = Path(root)
@@ -47,13 +48,18 @@ class MTProtoIngester:
         self.broadcast: set[str] = set()
 
     # ------------------------------------------------------------------ main
-    def run(self) -> str:
+    def activity(self):
+        """The CollectionRun context for this collection (same run key for every batch)."""
         rid = self.run_meta.get("id") or run_id(self.root.resolve())
-        with self.g.activity("CollectionRun", f"mtproto:{rid}", agent={
-                "tool": self.run_meta.get("client", "telethon"), "version": str(self.run_meta.get("clientVersion", "")),
-                "codeLicense": "MIT", "weightsLicense": "n/a"},
-                source="MTProto", layer=self.run_meta.get("layer", 230),
-                collector=self.collector_key, method="user-account") as run:
+        return self.g.activity("CollectionRun", f"mtproto:{rid}", agent={
+            "tool": self.run_meta.get("client", "telethon"), "version": str(self.run_meta.get("clientVersion", "")),
+            "codeLicense": "MIT", "weightsLicense": "n/a"},
+            source="MTProto", layer=self.run_meta.get("layer", 230),
+            collector=self.collector_key, method="user-account")
+
+    def run(self) -> str:
+        """Ingest the whole directory into ``self.g`` (in-memory engine)."""
+        with self.activity() as run:
             if self.collector:
                 self.user(self.collector, is_collector=True)
             for obj in _jsonl(self.root / "entities.jsonl"):
@@ -87,6 +93,7 @@ class MTProtoIngester:
         return t
 
     def entity(self, o: dict) -> None:
+        """Dispatch one entities.jsonl record to its handler (unknown constructors are warned, not fatal)."""
         t = self._wrapper_name(o)
         handler = {
             "User": self.user, "Channel": self.channel, "Chat": self.basic_chat,
@@ -102,6 +109,7 @@ class MTProtoIngester:
 
     # --------------------------------------------------------------- people
     def user(self, u: dict, is_collector: bool = False) -> str:
+        """User -> Account (+ usernames, privacy-aware fields, viewer-relative contact edges, avatar)."""
         g, key = self.g, K.user(u["id"])
         cls = "DeletedAccount" if u.get("deleted") else "BotAccount" if u.get("bot") else "HumanAccount"
         labels = [cls] + (["Collector"] if is_collector or u.get("is_self") else [])
@@ -147,6 +155,7 @@ class MTProtoIngester:
         return key
 
     def user_full(self, o: dict) -> None:
+        """users.UserFull -> ProfileSnapshot, personal channel, business bot, peer-settings provenance."""
         g = self.g
         for u in o.get("users", []):
             self.user(u)
@@ -184,6 +193,7 @@ class MTProtoIngester:
             g.edge("ANNOTATES", ann, key, scope=Scope.COLLECTOR_ONLY.value, observed_by=self.collector_key)
 
     def contacts(self, o: dict) -> None:
+        """contacts.Contacts -> collector-scoped KNOWS edges."""
         for u in o.get("users", []):
             self.user(u)
         for c in o.get("contacts", []):
@@ -191,6 +201,7 @@ class MTProtoIngester:
                         observed_by=self.collector_key, mutual=bool(c.get("mutual")))
 
     def gifts(self, o: dict) -> None:
+        """SavedStarGifts -> dated GAVE_GIFT_TO edges; hidden senders become a typed gap."""
         g = self.g
         recipient = K.peer_from_mtproto((o.get("_tgo") or {}).get("peer"))
         hidden = 0
@@ -211,6 +222,7 @@ class MTProtoIngester:
 
     # --------------------------------------------------------------- groups
     def channel(self, c: dict) -> str:
+        """Channel -> Channel/Supergroup/Forum/Gigagroup/Monoforum (+ usernames, title history, community link)."""
         g, key = self.g, K.channel(c["id"])
         if c.get("broadcast"):
             cls = "Monoforum" if c.get("monoforum") else "Channel"
@@ -246,6 +258,7 @@ class MTProtoIngester:
         return key
 
     def basic_chat(self, c: dict) -> str:
+        """Chat -> BasicGroup."""
         key = K.chat(c["id"])
         self.g.node(key, "BasicGroup", chatId=c["id"], title=c.get("title"), label=c.get("title"),
                     groupKind="basic_group", participantsCount=c.get("participants_count"),
@@ -253,6 +266,7 @@ class MTProtoIngester:
         return key
 
     def community(self, c: dict) -> str:
+        """Community (layer 230) -> Community node."""
         key = K.community(c["id"])
         self.g.node(key, "Community", communityId=c["id"], title=c.get("title"), label=c.get("title"),
                     groupKind="community", createdAt=ts(c.get("date")), hidden=c.get("collapsed_in_dialogs"))
@@ -261,6 +275,7 @@ class MTProtoIngester:
         return key
 
     def community_full(self, o: dict) -> None:
+        """CommunityFull -> MEMBER_OF_COMMUNITY links and admin-visible joiner/creator roles."""
         fc = o.get("full_community") or o["full_chat"]
         ck = K.community(fc["id"])
         self.g.node(ck, "Community", about=fc.get("about"))
@@ -280,6 +295,7 @@ class MTProtoIngester:
                             via=ck)
 
     def chat_full(self, o: dict) -> None:
+        """messages.ChatFull -> chat details, linked discussion, basic-group participants."""
         for c in o.get("chats", []):
             (self.channel if c.get("_") == "Channel" else self.basic_chat)(c)
         for u in o.get("users", []):
@@ -299,6 +315,7 @@ class MTProtoIngester:
                 self._participant(key, p, Scope.MEMBERS.value)
 
     def participants(self, o: dict) -> None:
+        """channels.ChannelParticipants -> MEMBER_OF/ADMIN_OF/INVITED_BY with visibility scope."""
         for u in o.get("users", []):
             self.user(u)
         meta = o.get("_tgo") or {}
@@ -327,6 +344,7 @@ class MTProtoIngester:
                    chat=chat_key)
 
     def sticker_set(self, o: dict) -> None:
+        """messages.StickerSet -> StickerSet, documents and *observed* ownership only."""
         s = o["set"]
         sk = K.sticker_set(s.get("id"), s.get("short_name"))
         self.g.node(sk, "StickerSet", title=s.get("title"), shortName=s.get("short_name"), count=s.get("count"),
@@ -346,6 +364,7 @@ class MTProtoIngester:
             self.g.edge("IN_STICKER_SET", dk, sk)
 
     def story(self, s: dict) -> None:
+        """StoryItem -> Story, reposts and media areas (geo/venue, channel post, URL) with W3C selectors."""
         g = self.g
         owner = K.peer_from_mtproto((s.get("_tgo") or {}).get("peer"))
         sk = K.story(owner, s["id"])
@@ -385,6 +404,7 @@ class MTProtoIngester:
 
     # ------------------------------------------------------------- messages
     def message(self, m: dict) -> None:
+        """Message/MessageService -> message node, sender, forwards, replies, topics, mentions, reactions, media, actions."""
         g = self.g
         peer = K.peer_from_mtproto(m.get("peer_id"))
         if not peer:
@@ -530,4 +550,5 @@ class MTProtoIngester:
 
 
 def ingest(g: Graph, root: str | Path) -> str:
+    """Ingest one collection directory into ``g``; returns the CollectionRun key."""
     return MTProtoIngester(g, Path(root)).run()

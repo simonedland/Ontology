@@ -189,3 +189,58 @@ def test_runtime_imports_are_declared_dependencies(tmp_path):
     assert not undeclared, f"imported at runtime but not declared in pyproject: {undeclared}"
     # Extras are fine only if the pipeline degrades without them (they are imported lazily inside try/except).
     print("optional extras exercised:", optional_only)
+
+
+# ------------------------------------------------------------------ DuckDB scale engine
+_E2E_DUCKDB = _E2E.replace("pipeline.run(data, out)", """from tgo.config import Config
+    cfg = Config(); cfg.scale.engine = "duckdb"
+    pipeline.run(data, out, config=cfg, log=lambda *a: None)""")
+
+
+def test_duckdb_store_cannot_fetch_extensions(tmp_path, monkeypatch):
+    pytest.importorskip("duckdb")
+    # Safety net: DuckDB falls back to HTTP_PROXY, so even a regressed Store cannot download here.
+    monkeypatch.setenv("HTTP_PROXY", "127.0.0.1:9")
+    monkeypatch.setenv("HTTPS_PROXY", "127.0.0.1:9")
+    from tgo.scale.store import Store
+
+    ext_dir = Path.home() / ".duckdb" / "extensions"
+    before = sorted(ext_dir.rglob("*")) if ext_dir.exists() else []
+    s = Store(tmp_path / "t.duckdb")
+    get = lambda k: s.con.execute(f"SELECT current_setting('{k}')").fetchone()[0]
+    assert get("autoinstall_known_extensions") is False
+    assert get("autoload_known_extensions") is False
+    assert get("lock_configuration") is True
+    # An explicit INSTALL is a statement, not a setting: only a dead proxy stops it reaching the internet.
+    assert get("http_proxy").startswith("127.0.0.1:")
+    import duckdb
+
+    # Layer 2 (enable_external_access=false): a policy refusal before any file or network access.
+    for q in ("INSTALL httpfs", "INSTALL httpfs FROM core"):
+        with pytest.raises(duckdb.PermissionException):
+            s.con.execute(q)
+    outside = tmp_path.parent / "outside_allowed.csv"
+    outside.write_text("a\n1\n")
+    with pytest.raises(duckdb.PermissionException):
+        s.con.execute(f"SELECT * FROM read_csv('{outside.as_posix()}')")
+    with pytest.raises(Exception):          # the configuration is locked
+        s.con.execute("SET http_proxy = ''")
+    assert (sorted(ext_dir.rglob("*")) if ext_dir.exists() else []) == before
+    # (Even listing the extension directory is refused now: duckdb_extensions() raises PermissionException.)
+
+
+def test_pipeline_duckdb_engine_offline(tmp_path):
+    pytest.importorskip("duckdb")
+    import subprocess
+    import sys
+
+    dead = "http://127.0.0.1:9"
+    env = {**os.environ, **offline.OFFLINE_ENV, "HTTP_PROXY": dead, "HTTPS_PROXY": dead, "ALL_PROXY": dead,
+           "PYTHONPATH": str(Path(__file__).resolve().parents[1])}
+    r = subprocess.run([sys.executable, "-c", _E2E_DUCKDB, str(tmp_path / "d"), str(tmp_path / "o")],
+                       env=env, capture_output=True, text=True, timeout=900)
+    assert r.returncode == 0, (r.stdout + r.stderr)[-4000:]
+    out = tmp_path / "o"
+    assert (out / "tgo.duckdb").is_file()
+    html = list(out.rglob("*.html"))
+    assert html and offline.scan(html) == []

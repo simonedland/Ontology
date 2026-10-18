@@ -1,3 +1,4 @@
+"""Helpers shared by the ingest adapters: timestamps, run ids, media nodes and attachments."""
 from __future__ import annotations
 
 import hashlib
@@ -26,6 +27,7 @@ def ts(v) -> int | None:
 
 
 def run_id(*parts) -> str:
+    """Short deterministic id (sha256 prefix) for a collection run from its identifying parts."""
     return hashlib.sha256("|".join(map(str, parts)).encode()).hexdigest()[:12]
 
 
@@ -65,6 +67,7 @@ def attach_file(g: Graph, root: Path, rel_path: str | None, cls: str, send_mode:
 
 
 def attachment(g: Graph, msg_key: str, media_key: str, idx: int, t: int | None, **props) -> None:
+    """Create the MediaAttachment occurrence (spoiler/TTL live here) and link message -> media."""
     ak = K.attachment(msg_key, idx)
     g.node(ak, "MediaAttachment", **props)
     g.edge("ATTACHMENT_OF", ak, msg_key, t=t)

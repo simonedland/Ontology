@@ -36,8 +36,9 @@ def verify(manifest: dict) -> list[str]:
         p = VENDOR / f["file"]
         if not p.exists() or hashlib.sha256(p.read_bytes()).hexdigest() != f["sha256"]:
             bad.append(f["file"])
-        if not (VENDOR / f["license_file"]).exists():
-            bad.append(f["license_file"])
+        for name in [f["license_file"], *(n["file"] for n in f.get("notices", []))]:
+            if not (VENDOR / name).exists():
+                bad.append(name)
     return bad
 
 
@@ -53,6 +54,9 @@ def fetch(manifest: dict) -> None:
                                                                           "package/license.txt"}), None)
             if lic:
                 (VENDOR / f["license_file"]).write_bytes(tar.extractfile(lic).read())
+            # Apache-2.0 4(d): NOTICE files and bundled third-party licences ship alongside.
+            for n in f.get("notices", []):
+                (VENDOR / n["file"]).write_bytes(tar.extractfile(n["member"]).read())
         (VENDOR / f["file"]).write_bytes(data)
         f["sha256"] = hashlib.sha256(data).hexdigest()
         print(f"{f['name']}@{f['version']} -> {f['file']} sha256={f['sha256']}")

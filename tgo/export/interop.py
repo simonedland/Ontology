@@ -21,6 +21,7 @@ def _date(t) -> str | None:
 
 
 def ftm_entities(g: Graph) -> list[dict]:
+    """Map the graph to FollowTheMoney entities (UserAccount, Organization, Message, Membership, Similar, ...)."""
     ents: list[dict] = []
 
     def ent(key, schema, **props):
@@ -40,7 +41,8 @@ def ftm_entities(g: Graph) -> list[dict]:
     for n in g.by_label("Account"):
         # FtM UserAccount: username is required; phone (not number)
         ent(n.key, "UserAccount", service="telegram", username=usernames.get(n.key) or n.key,
-            name=n.props.get("label"), phone=n.props.get("phone"), owner=owners.get(n.key))
+            name=n.props.get("label") or n.props.get("collectorDisplayName"), phone=n.props.get("phone"),
+            owner=owners.get(n.key))
     for n in g.by_label("PlatformGroup"):
         if n.labels & {"Chat", "Community"} and "PrivateChat" not in n.labels:
             ent(n.key, "Organization", name=n.props.get("title") or n.props.get("label"),
@@ -75,6 +77,7 @@ def ftm_entities(g: Graph) -> list[dict]:
 
 
 def write_ftm(g: Graph, path: str | Path) -> int:
+    """Write FtM entities as JSON lines; returns the entity count."""
     ents = ftm_entities(g)
     with open(path, "w", encoding="utf-8") as f:
         for e in ents:
@@ -92,13 +95,14 @@ def _sid(t: str, key: str) -> str:
 
 
 def stix_bundle(g: Graph) -> dict:
+    """Map the graph to a STIX 2.1 bundle (user-account, OpenCTI channel/wallet/phone, relationships)."""
     objs: list[dict] = []
     ids: dict[str, str] = {}
     usernames = {e.src: g.nodes[e.dst].props.get("usernameValue") for e in g.by_type("HAS_USERNAME")}
     for n in g.by_label("Account"):
         i = ids[n.key] = _sid("user-account", n.key)
         objs.append({"type": "user-account", "spec_version": "2.1", "id": i, "user_id": str(n.props.get("userId", n.key)),
-                     "account_login": usernames.get(n.key), "display_name": n.props.get("label"),
+                     "account_login": usernames.get(n.key), "display_name": n.props.get("label") or n.props.get("collectorDisplayName"),
                      "account_type": "telegram", "is_service_account": bool(n.props.get("isBot"))})
     for n in g.by_label("Chat"):
         if "PrivateChat" in n.labels or not n.key.startswith(("channel:", "chat:")):
@@ -135,6 +139,7 @@ def stix_bundle(g: Graph) -> dict:
 
 
 def write_stix(g: Graph, path: str | Path) -> int:
+    """Write the STIX 2.1 bundle; returns the object count."""
     b = stix_bundle(g)
     Path(path).write_text(json.dumps(b, indent=1, ensure_ascii=False), encoding="utf-8")
     return len(b["objects"])
@@ -176,6 +181,7 @@ def write_cypher(g: Graph, path: str | Path) -> None:
 
 
 def write_gexf(g: Graph, path: str | Path) -> None:
+    """Legacy NetworkX GEXF writer (the pipeline uses :mod:`tgo.export.gexf`)."""
     import networkx as nx
 
     G = g.to_networkx()

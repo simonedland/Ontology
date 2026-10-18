@@ -55,14 +55,17 @@ PHONE_MARK = "+47 912 34 567"
 
 
 def PU(i):
+    """Telethon-shaped ``PeerUser`` dict."""
     return {"_": "PeerUser", "user_id": i}
 
 
 def PC(i):
+    """Telethon-shaped ``PeerChannel`` dict."""
     return {"_": "PeerChannel", "channel_id": i}
 
 
 def iso(dt: datetime) -> str:
+    """ISO-8601 UTC string for a datetime."""
     return dt.astimezone(UTC).isoformat()
 
 

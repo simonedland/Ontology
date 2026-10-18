@@ -1,3 +1,4 @@
+"""Exporters for the in-memory graph: Turtle, FtM, STIX 2.1, Neo4j Cypher, GEXF."""
 from .gexf import write_gexf
 from .interop import write_cypher, write_ftm, write_stix
 from .turtle import write as write_turtle

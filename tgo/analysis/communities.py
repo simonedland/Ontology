@@ -25,12 +25,19 @@ def _jaccard(a: set, b: set) -> float:
     return len(a & b) / len(a | b) if a | b else 0.0
 
 
-def run(g: Graph, seeds: int = 10, resolution: float = 1.0, min_size: int = 3, min_stability: float = 0.6) -> dict:
+def run(g: Graph, seeds: int = 10, resolution: float = 1.0, min_size: int = 3, min_stability: float = 0.6,
+        edge_weights: dict[str, float] | None = None, deterministic: bool = True) -> dict:
+    """Seeded multi-run Louvain over the actor graph; writes CommunityCluster nodes and roles.
+
+    ``edge_weights`` maps relationship type -> weight (default :data:`ACTOR_EDGES`).
+    Parameters mirror :class:`tgo.config.CommunityConfig`.  Returns counts.
+    """
+    weights = ACTOR_EDGES if edge_weights is None else edge_weights
     import networkx as nx
 
     G = nx.Graph()
     for e in sorted(g.edges.values(), key=lambda e: e.id):   # deterministic input order for seeded louvain
-        w = ACTOR_EDGES.get(e.type)
+        w = weights.get(e.type)
         if not w or e.src == e.dst:
             continue
         inc = w * e.conf * (1 + (e.props.get("count", 1) - 1) ** 0.5)
@@ -46,7 +53,7 @@ def run(g: Graph, seeds: int = 10, resolution: float = 1.0, min_size: int = 3, m
     if G.number_of_edges() == 0:
         return out
     params = dict(algorithm="louvain", seeds=seeds, resolution=resolution, min_size=min_size,
-                  min_stability=min_stability, edge_weights=ACTOR_EDGES)
+                  min_stability=min_stability, edge_weights=weights)
     with g.activity("DetectionRun", f"louvain:r{resolution}:s{seeds}", agent={
             "tool": "networkx.louvain_communities", "version": nx.__version__, "codeLicense": "BSD-3-Clause",
             "weightsLicense": "n/a"}, **params) as run_key:

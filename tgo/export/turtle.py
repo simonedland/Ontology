@@ -18,15 +18,18 @@ from ..graph import Graph
 
 
 def camel(s: str) -> str:
+    """``RELATION_NAME`` -> ``relationName`` (predicate local name)."""
     parts = s.lower().split("_")
     return parts[0] + "".join(p.title() for p in parts[1:])
 
 
 def iri(key: str) -> str:
+    """Instance IRI (``tgr:``) for a node key, percent-encoded."""
     return f"<{O.TGR}{quote(key, safe=':/@-._~')}>"
 
 
 def lit(v) -> str:
+    """Turtle literal for a Python value (lists/dicts become JSON strings)."""
     if isinstance(v, bool):
         return "true" if v else "false"
     if isinstance(v, int):
@@ -43,6 +46,7 @@ _PROP_OK = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 
 def tbox() -> str:
+    """Turtle for the ontology itself: classes, object properties, SKOS schemes."""
     out = []
     out.append(f"{iri('ontology')} a owl:Ontology ; rdfs:label \"Telegram Graph Ontology (TGO)\" .\n")
     for c in O.CLASSES.values():
@@ -71,6 +75,7 @@ def tbox() -> str:
 
 
 def abox(g: Graph) -> str:
+    """Turtle for the instance data, reifying every non-observed edge as tg:Assertion."""
     out = []
     for n in g.nodes.values():
         lines = [f"{iri(n.key)} a " + ", ".join(f"tg:{lab}" for lab in sorted(n.labels) if lab in O.CLASSES or True)
@@ -129,11 +134,13 @@ def abox(g: Graph) -> str:
 
 
 def write(g: Graph, path: str | Path, include_tbox: bool = True) -> None:
+    """Write prefixes + (optionally) TBox + ABox to ``path``."""
     head = "\n".join(f"@prefix {k}: <{v}> ." for k, v in O.PREFIXES.items()) + "\n\n"
     body = (tbox() + "\n\n" if include_tbox else "") + abox(g)
     Path(path).write_text(head + body, encoding="utf-8")
 
 
 def write_tbox(path: str | Path) -> None:
+    """Write only the TBox (``ontology.ttl``)."""
     head = "\n".join(f"@prefix {k}: <{v}> ." for k, v in O.PREFIXES.items()) + "\n\n"
     Path(path).write_text(head + tbox(), encoding="utf-8")

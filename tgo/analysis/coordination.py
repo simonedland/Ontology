@@ -29,6 +29,7 @@ from .aggregate import chat_of, sender_of
 
 @dataclass(frozen=True)
 class Share:
+    """One share event: ``account_id`` posted ``object_id`` (of ``kind``) in ``content_id`` at ``ts``."""
     object_id: str
     kind: str          # text | simhash | forward | url | media
     account_id: str
@@ -37,12 +38,14 @@ class Share:
 
 
 def normalize(text: str) -> str:
+    """Lower-case, strip URLs and punctuation, collapse whitespace (text identity for co-posting)."""
     t = re.sub(r"https?://\S+", " ", text.lower())
     t = re.sub(r"[^\w\s]", " ", t)
     return re.sub(r"\s+", " ", t).strip()
 
 
 def simhash(text: str, bits: int = 64) -> int:
+    """64-bit SimHash over word 3-grams of the normalised text (near-duplicate text detection)."""
     toks = normalize(text).split()
     grams = [" ".join(toks[i:i + 3]) for i in range(max(1, len(toks) - 2))]
     v = [0] * bits
@@ -54,6 +57,7 @@ def simhash(text: str, bits: int = 64) -> int:
 
 
 def build_shares(g: Graph, min_text_len: int = 40) -> list[Share]:
+    """Extract share events (text hash, SimHash, forwarded original, URL, media/fingerprint) from messages."""
     shares: list[Share] = []
     for m in g.by_label("Message"):
         if "ServiceMessage" in m.labels or m.props.get("date") is None:
@@ -61,7 +65,10 @@ def build_shares(g: Graph, min_text_len: int = 40) -> list[Share]:
         chat = chat_of(g, m.key)
         if chat is None:
             continue
-        actor = chat if chat.startswith("channel:") and "Channel" in g.nodes[chat].labels else sender_of(g, m.key)
+        # channel posts are SENT by the channel itself (ingest sets the sender), so the sender is the
+        # actor; falling back to the chat keeps sender-less posts.  Needs no chat labels, so it also
+        # works inside an isolated ingest batch (tgo.scale).
+        actor = sender_of(g, m.key) or chat
         if actor is None:
             continue
         t = int(m.props["date"])
@@ -168,11 +175,16 @@ EDGE_FOR_KIND = {"text": "IDENTICAL_POST", "neardup": "NEAR_DUP_POST", "forward"
 
 
 def run(g: Graph, time_window: int = 60, min_participation: int = 2, sync_seconds: int = 5,
-        max_p: float | None = 1e-3) -> dict:
+        max_p: float | None = 1e-3, min_text_len: int = 40, simhash_max_dist: int = 3,
+        min_cluster_size: int = 3, same_day_min: int = 3, same_day_max: int = 50) -> dict:
+    """Detect coordinated actor pairs and clusters and write them to ``g``.
+
+    Parameters mirror :class:`tgo.config.CoordinationConfig`.  Returns counts.
+    """
     params = dict(time_window=time_window, min_participation=min_participation, sync_seconds=sync_seconds,
                   object_types=sorted(EDGE_FOR_KIND), null_model="poisson", max_p=max_p)
-    shares = build_shares(g)
-    pairs = detect_groups(shares, time_window, min_participation, max_p=max_p)
+    shares = build_shares(g, min_text_len=min_text_len)
+    pairs = detect_groups(shares, time_window, min_participation, simhash_max_dist=simhash_max_dist, max_p=max_p)
     out = {"shares": len(shares), "pairs": len(pairs), "clusters": 0}
     with g.activity("DetectionRun", f"coortweet:w{time_window}:m{min_participation}", agent={
             "tool": "tgo-coortweet", "version": "0.1 (port of CooRTweet detect_groups)", "codeLicense": "MIT",
@@ -203,7 +215,7 @@ def run(g: Graph, time_window: int = 60, min_participation: int = 2, sync_second
                 comp.add(x)
                 stack.extend(adj[x] - comp)
             seen |= comp
-            if len(comp) < 3:
+            if len(comp) < min_cluster_size:
                 continue
             members = sorted(comp)
             ck = f"cluster:coord:{K.shortuuid(*members)}"
@@ -225,7 +237,7 @@ def run(g: Graph, time_window: int = 60, min_participation: int = 2, sync_second
             if n.props.get("createdAt"):
                 by_day[int(n.props["createdAt"]) // 86400].append(n.key)
         for day, chats in by_day.items():
-            if 3 <= len(chats) <= 50:
+            if same_day_min <= len(chats) <= same_day_max:
                 chats.sort()
                 for a, b in combinations(chats, 2):
                     g.edge("SAME_CREATION_DATE", a, b, conf=0.4, method="createdAt day bucket",

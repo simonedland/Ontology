@@ -122,7 +122,7 @@ def _family(labels: set[str]) -> str:
 
 def _label(n) -> str:
     p = n.props
-    for k in ("label", "title", "usernameValue", "value", "name", "fileName"):
+    for k in ("label", "title", "usernameValue", "value", "name", "fileName", "collectorDisplayName"):
         if p.get(k):
             v = str(p[k])
             return ("@" + v) if k == "usernameValue" else v
@@ -213,6 +213,7 @@ def select_nodes(g: Graph, max_nodes: int) -> set[str]:
 
 
 def build_data(g: Graph, findings, report: dict, positions: dict, max_nodes: int = 6000) -> dict:
+    """Assemble the JSON payload the viewer embeds (nodes, edges, runs, findings, views, ...)."""
     keep = select_nodes(g, max_nodes)
     deg = defaultdict(int)
     for e in g.edges.values():
@@ -284,8 +285,9 @@ def build_data(g: Graph, findings, report: dict, positions: dict, max_nodes: int
 
 
 def build_report(g: Graph, findings, report: dict, positions: dict, out_path: str | Path,
-                 title: str = "TGO investigation view") -> Path:
-    data = build_data(g, findings, report, positions)
+                 title: str = "TGO investigation view", max_nodes: int = 6000) -> Path:
+    """Write the single-file offline viewer to ``out_path`` and return it."""
+    data = build_data(g, findings, report, positions, max_nodes=max_nodes)
     tpl = (HERE / "template.html").read_text(encoding="utf-8")
     js = (HERE / "vendor" / "cytoscape.min.js").read_text(encoding="utf-8").replace("</script", "<\\/script")
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"), default=str).replace("<", "\\u003c")

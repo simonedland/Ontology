@@ -226,3 +226,6 @@ out/
 .tgo/
 wheelhouse/
 models/
+
+# Ontop JDBC driver (fetched separately; never commit)
+deploy/ontop/jdbc/

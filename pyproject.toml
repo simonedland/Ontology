@@ -29,7 +29,10 @@ tesseract = ["pytesseract>=0.3.13"]
 # The xx_ent_wiki_sm model is a separate wheel (github.com/explosion/spacy-models releases).
 ner = ["spacy>=3.8,<4"]
 ids = ["phonenumbers>=8.13"]
-all = ["tgo[collect,image,docs,asr,ocr,tesseract,ner,ids]"]
+# Columnar engine for millions of entries (tgo.scale): DuckDB store, Arrow, NetworKit (parallel Louvain),
+# Faiss binary indexes. All MIT/Apache. Pin DuckDB < 2 until its 2.0 storage format settles.
+scale = ["duckdb>=1.5,<2", "pyarrow>=15", "networkit>=11", "faiss-cpu>=1.14"]
+all = ["tgo[collect,image,docs,asr,ocr,tesseract,ner,ids,scale]"]
 
 [project.scripts]
 tgo = "tgo.cli:main"

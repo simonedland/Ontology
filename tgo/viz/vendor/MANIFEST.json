@@ -11,6 +11,27 @@
       "member": "package/dist/cytoscape.min.js",
       "file": "cytoscape.min.js",
       "sha256": "1bb5340e549511e111b31e5684872c949ad33d40ea5dba0ad8e7d90c62c7b3b9"
+    },
+    {
+      "name": "echarts",
+      "version": "6.1.0",
+      "license": "Apache-2.0",
+      "license_file": "LICENSE-echarts.txt",
+      "tarball": "https://registry.npmjs.org/echarts/-/echarts-6.1.0.tgz",
+      "integrity": "sha512-q0yaFPggC9FUdsWH4blavRWFmxdrIodbkoKNAjJudAI6CA9gNPxHtV2RcZNEepZVlk4yvBYkOkbk6HIVpIyHZA==",
+      "member": "package/dist/echarts.min.js",
+      "file": "echarts.min.js",
+      "sha256": "b66b25aeb4df84e33199dc21694014d336d222cbd9deb0e5a7c14bd6aa0d0fd0",
+      "notices": [
+        {
+          "member": "package/NOTICE",
+          "file": "NOTICE-echarts.txt"
+        },
+        {
+          "member": "package/licenses/LICENSE-d3",
+          "file": "LICENSE-echarts-d3.txt"
+        }
+      ]
     }
   ]
 }

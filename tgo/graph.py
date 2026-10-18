@@ -30,6 +30,7 @@ MAX_EVIDENCE = 50
 
 @dataclass
 class Node:
+    """A node: deterministic key, labels (with ontology ancestors), props, source runs, field visibility."""
     key: str
     labels: set[str] = field(default_factory=set)
     props: dict = field(default_factory=dict)
@@ -37,12 +38,14 @@ class Node:
     fields: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
+        """Plain-dict form used by :meth:`Graph.save`."""
         return {"key": self.key, "labels": sorted(self.labels), "props": self.props,
                 "sources": sorted(self.sources), "fields": self.fields}
 
 
 @dataclass
 class Edge:
+    """A typed edge; ``props`` always carry status, conf, method, evidence, runs and count."""
     id: str
     type: str
     src: str
@@ -51,17 +54,21 @@ class Edge:
 
     @property
     def status(self) -> str:
+        """Epistemic status (observed / file_declared / inferred / analyst)."""
         return self.props.get("status", "observed")
 
     @property
     def conf(self) -> float:
+        """Confidence in [0, 1]."""
         return float(self.props.get("conf", 1.0))
 
     def to_dict(self) -> dict:
+        """Plain-dict form used by :meth:`Graph.save`."""
         return {"id": self.id, "type": self.type, "src": self.src, "dst": self.dst, "props": self.props}
 
 
 class Graph:
+    """Provenance-aware property graph with MERGE semantics (the adapter-facing write API)."""
     def __init__(self) -> None:
         self.nodes: dict[str, Node] = {}
         self.edges: dict[str, Edge] = {}
@@ -72,6 +79,7 @@ class Graph:
 
     # ------------------------------------------------------------------ nodes
     def node(self, key: str, *labels: str, run: str | None = None, **props) -> Node:
+        """MERGE a node: add labels (+ ontology ancestors), set non-None props, record the current run."""
         n = self.nodes.get(key)
         if n is None:
             n = self.nodes[key] = Node(key)
@@ -90,6 +98,7 @@ class Graph:
         return n
 
     def has(self, key: str) -> bool:
+        """True if the node key exists."""
         return key in self.nodes
 
     def field(self, key: str, name: str, value, visibility: O.Visibility | str, *,
@@ -113,6 +122,7 @@ class Graph:
              evidence: Iterable[str] = (), run: str | None = None,
              scope: str | None = None, observed_by: str | None = None,
              t: int | None = None, discriminator: str | None = None, **props) -> Edge:
+        """MERGE an edge; repeated calls increment ``count``, widen ``t_first/t_last`` and union evidence."""
         rel = O.RELATIONS.get(type_)
         if rel is None:
             self._warn(f"relationship '{type_}' is not declared in the ontology")
@@ -162,25 +172,40 @@ class Graph:
                 p[k] = v
         return e
 
+    def add_raw_node(self, node: Node) -> None:
+        """Insert an already-merged node as-is (bulk load from a store; no MERGE logic)."""
+        self.nodes[node.key] = node
+
+    def add_raw_edge(self, edge: Edge) -> None:
+        """Insert an already-merged edge as-is (bulk load from a store; no MERGE logic)."""
+        self.edges[edge.id] = edge
+        self._out.setdefault(edge.src, set()).add(edge.id)
+        self._in.setdefault(edge.dst, set()).add(edge.id)
+
     def out_edges(self, key: str, type_: str | None = None) -> Iterator[Edge]:
+        """Outgoing edges of ``key`` (optionally of one type), in deterministic order."""
         for eid in sorted(self._out.get(key, ())):
             e = self.edges[eid]
             if type_ is None or e.type == type_:
                 yield e
 
     def in_edges(self, key: str, type_: str | None = None) -> Iterator[Edge]:
+        """Incoming edges of ``key`` (optionally of one type), in deterministic order."""
         for eid in sorted(self._in.get(key, ())):
             e = self.edges[eid]
             if type_ is None or e.type == type_:
                 yield e
 
     def by_label(self, label: str) -> list[Node]:
+        """All nodes carrying ``label`` (including via ontology inheritance)."""
         return [n for n in self.nodes.values() if label in n.labels]
 
     def by_type(self, type_: str) -> list[Edge]:
+        """All edges of relationship ``type_``."""
         return [e for e in self.edges.values() if e.type == type_]
 
     def remove_edge(self, eid: str) -> None:
+        """Delete an edge by id (rarely needed: TGO prefers soft deletes via props)."""
         e = self.edges.pop(eid, None)
         if e:
             self._out.get(e.src, set()).discard(eid)
@@ -189,6 +214,7 @@ class Graph:
     # ------------------------------------------------------------ provenance
     @property
     def current_run(self) -> str | None:
+        """Key of the innermost active ``activity()`` run, or None."""
         return self._run_stack[-1] if self._run_stack else None
 
     @contextmanager
@@ -222,6 +248,7 @@ class Graph:
             self.warnings.append(msg)
 
     def stats(self) -> dict:
+        """Counts by node family, edge type and epistemic status."""
         labels: dict[str, int] = {}
         for n in self.nodes.values():
             fam = O.family(n.labels) if n.labels else "unlabelled"
@@ -236,14 +263,17 @@ class Graph:
                 "edge_types": dict(sorted(types.items())), "edge_status": status}
 
     def to_dict(self) -> dict:
+        """Plain-dict form used by :meth:`Graph.save`."""
         return {"nodes": [n.to_dict() for n in self.nodes.values()],
                 "edges": [e.to_dict() for e in self.edges.values()]}
 
     def save(self, path: str | Path) -> None:
+        """Write the graph as JSON (``graph.json`` contract)."""
         Path(path).write_text(json.dumps(self.to_dict(), indent=1, default=str), encoding="utf-8")
 
     @classmethod
     def load(cls, path: str | Path) -> "Graph":
+        """Read a graph written by :meth:`save` (or ``case_graph.json``)."""
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         g = cls()
         for nd in data["nodes"]:
@@ -256,6 +286,7 @@ class Graph:
         return g
 
     def to_networkx(self, edge_types: set[str] | None = None):
+        """NetworkX MultiDiGraph view (primitive props only), optionally restricted to edge types."""
         import networkx as nx
 
         G = nx.MultiDiGraph()

@@ -28,6 +28,7 @@ from .graph import Graph
 
 
 def sha256_file(path: str | Path) -> str:
+    """Streaming sha256 of a file (hex)."""
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
@@ -37,6 +38,7 @@ def sha256_file(path: str | Path) -> str:
 
 @dataclass
 class PHash:
+    """A perceptual hash with its algorithm, bit width, quality and near-duplicate threshold."""
     algo: str      # pdq | phash64 | dhash64
     hex: str
     bits: int
@@ -85,6 +87,7 @@ def perceptual_hash(path: str | Path) -> PHash | None:
 
 
 def hamming(a: str, b: str) -> int:
+    """Hamming distance between two equal-length hex hashes."""
     return bin(int(a, 16) ^ int(b, 16)).count("1")
 
 
@@ -334,7 +337,15 @@ GAZETTEER = {
 }
 
 
-def entities(text: str) -> list[tuple[str, str, int, int]]:
+def load_gazetteer(path) -> dict[str, str]:
+    """``{"surface form": "LOC|ORG|PER"}`` from JSON, lower-cased; the demo GAZETTEER if ``path`` is None."""
+    if not path:
+        return GAZETTEER
+    return {k.lower(): v for k, v in json.loads(Path(path).read_text(encoding="utf-8")).items()}
+
+
+def entities(text: str, gazetteer: dict[str, str] | None = None) -> list[tuple[str, str, int, int]]:
+    """Named entities as ``(surface, label, start, end)``: spaCy if a model is installed, else gazetteer."""
     try:
         import spacy  # type: ignore
 
@@ -343,7 +354,7 @@ def entities(text: str) -> list[tuple[str, str, int, int]]:
     except Exception:
         out = []
         for m in re.finditer(r"[\wÀ-ɏ]+", text):
-            lab = GAZETTEER.get(m.group(0).lower())
+            lab = (gazetteer or GAZETTEER).get(m.group(0).lower())
             if lab:
                 out.append((m.group(0), lab, m.start(), m.end()))
         return out
@@ -377,8 +388,13 @@ def _media_nodes(g: Graph):
             yield n
 
 
-def run_all(g: Graph, root: Path) -> dict:
-    """Run every extractor over every downloaded media node in the graph."""
+def run_all(g: Graph, root: Path, gazetteer: dict[str, str] | None = None,
+            phash_threshold: int | None = None) -> dict:
+    """Run every extractor over every downloaded media node (and all message text) in ``g``.
+
+    ``gazetteer`` replaces the demo place list; ``phash_threshold`` overrides the near-duplicate
+    Hamming threshold.  Returns per-extractor counts.
+    """
     counts = {"phash": 0, "exif": 0, "documents": 0, "transcripts": 0, "ocr": 0, "identifiers": 0}
     media = list(_media_nodes(g))
     images = [n for n in media if n.props.get("mime", "").startswith("image/") or "Photo" in n.labels
@@ -388,6 +404,8 @@ def run_all(g: Graph, root: Path) -> dict:
     hashes: dict[str, PHash] = {}
     for n in images:
         ph = perceptual_hash(root / n.props["localPath"])
+        if ph and phash_threshold is not None:
+            ph.threshold = phash_threshold
         if ph:
             hashes[n.key] = ph
     if hashes:
@@ -460,7 +478,7 @@ def run_all(g: Graph, root: Path) -> dict:
                 g.node(tk, "ExtractedText", text=res["text"][:20000], chars=len(res["text"]))
                 g.edge("HAS_TEXT", n.key, tk, method=res["tool"])
                 counts["identifiers"] += link_identifiers(g, n.key, res["text"], evidence=tk)
-                _link_entities(g, n.key, res["text"], tk)
+                _link_entities(g, n.key, res["text"], tk, gazetteer)
     # shared xmpMM:DocumentID across different sha256 => same document lineage
     by_xmp: dict[str, list[str]] = {}
     for e in g.by_type("HAS_METADATA"):
@@ -504,7 +522,7 @@ def run_all(g: Graph, root: Path) -> dict:
                 g.edge("HAS_SEGMENT", tk, sk, conf=0.9, method=tr["tool"], evidence=[n.key],
                        startSec=s["start"], endSec=s["end"])
             counts["identifiers"] += link_identifiers(g, n.key, full, evidence=tk)
-            _link_entities(g, n.key, full, tk)
+            _link_entities(g, n.key, full, tk, gazetteer)
 
     # 5. Gated OCR (screenshot-like images) -------------------------------
     for n in images:
@@ -529,8 +547,8 @@ def run_all(g: Graph, root: Path) -> dict:
     return counts
 
 
-def _link_entities(g: Graph, src: str, text: str, evidence: str) -> None:
-    for surface, label, s, e in entities(text):
+def _link_entities(g: Graph, src: str, text: str, evidence: str, gazetteer=None) -> None:
+    for surface, label, s, e in entities(text, gazetteer):
         ek = f"entity:{label}:{surface.lower()}"
         g.node(ek, "ExtractedEntity", name=surface, entityType=label)
         g.edge("MENTIONS_ENTITY", src, ek, conf=0.7, method="ner:gazetteer", evidence=[evidence],

@@ -41,7 +41,8 @@ _PY = [
     (re.compile(r"\bhf_hub_download\b|\bsnapshot_download\b"), "HuggingFace download"),
     (re.compile(r"spacy\.cli\.download|\bnltk\.download\b"), "model download"),
     (re.compile(r"WhisperModel\((?![^)]*local_files_only\s*=\s*True)", re.S), "WhisperModel without local_files_only=True"),
-    (re.compile(r"\bRapidOCR\(\s*\)"),"RapidOCR() without explicit local model paths"),
+    (re.compile(r"\b(?:FORCE\s+)?INSTALL\s+['\"]?[a-z_]+['\"]?\s*(?:;|FROM|$)", re.M), "DuckDB INSTALL (downloads an extension)"),
+    (re.compile(r"\bRapidOCR\(\s*\)"), "RapidOCR() without explicit local model paths"),
     (re.compile(r"from_pretrained\((?![^)]*local_files_only\s*=\s*True)", re.S), "from_pretrained without local_files_only=True"),
 ]
 # The live MTProto collector is an explicitly online, separately invoked step.
@@ -66,7 +67,19 @@ def scan(paths: list[Path] | None = None) -> list[tuple[str, int, str]]:
             for rx, why in rules:
                 for m in rx.finditer(text):
                     hits.append((rel, text.count("\n", 0, m.start()) + 1, why))
+            # DuckDB downloads extensions from extensions.duckdb.org (auto-install, or an explicit INSTALL)
+            # in native code that the Python socket guard cannot see. A file that opens a connection must
+            # also carry the lockdown, however the config dict is assembled.
+            if p.suffix == ".py" and "duckdb.connect(" in text:
+                missing = [g for g in _DUCKDB_GUARDS if g not in text]
+                if missing:
+                    m = text.index("duckdb.connect(")
+                    hits.append((rel, text.count("\n", 0, m) + 1,
+                                 f"duckdb.connect without the offline lockdown (missing: {', '.join(missing)})"))
     return hits
+
+
+_DUCKDB_GUARDS = ("autoinstall_known_extensions", "http_proxy", "lock_configuration")
 
 
 from ._env import OFFLINE_ENV, harden_env  # noqa: E402,F401  (re-exported)

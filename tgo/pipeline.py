@@ -17,18 +17,21 @@ for _k, _v in {"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "HF_HUB_DISAB
                "ORT_DISABLE_TELEMETRY": "1", "DO_NOT_TRACK": "1"}.items():
     os.environ.setdefault(_k, _v)
 
+import copy  # noqa: E402
 import json  # noqa: E402
 import time  # noqa: E402
 from pathlib import Path  # noqa: E402
 
-from . import extractors, validate  # noqa: E402
+from . import extractors, plugins, validate  # noqa: E402
 from . import export as X  # noqa: E402
+from .config import Config  # noqa: E402
 from .analysis import aggregate, communities, coordination, identity  # noqa: E402
 from .graph import Graph  # noqa: E402
 from .ingest import ingest_desktop_export, ingest_mtproto  # noqa: E402
 
 
 def discover(input_dir: Path) -> dict:
+    """Find MTProto collections, Desktop exports and analyst judgements under ``input_dir``."""
     src = {"mtproto": [], "export": [], "judgements": None}
     for cj in sorted(input_dir.rglob("collector.json")):
         src["mtproto"].append(cj.parent)
@@ -40,8 +43,40 @@ def discover(input_dir: Path) -> dict:
     return src
 
 
-def build_graph(input_dir: str | Path, *, auto_accept: float | None = None, time_window: int = 60,
-                log=print) -> tuple[Graph, dict]:
+def input_bytes(input_dir: str | Path) -> int:
+    """Total size of the message-bearing source files under ``input_dir``."""
+    src = discover(Path(input_dir))
+    files = [d / n for d in src["mtproto"] for n in ("entities.jsonl", "messages.jsonl")] + list(src["export"])
+    return sum(f.stat().st_size for f in files if f.exists())
+
+
+def choose_engine(input_dir: str | Path, cfg: Config) -> str:
+    """``memory`` (rich in-process Graph) or ``duckdb`` (columnar corpus engine, tgo.scale)."""
+    eng = cfg.scale.engine
+    if eng == "auto":
+        try:
+            import duckdb  # noqa: F401
+        except ImportError:
+            return "memory"
+        return "duckdb" if input_bytes(input_dir) > cfg.scale.auto_engine_bytes else "memory"
+    if eng not in ("memory", "duckdb"):
+        raise ValueError(f"unknown engine {eng!r} (memory | duckdb | auto)")
+    return eng
+
+
+def build_graph(input_dir: str | Path, config: Config | None = None, *, auto_accept: float | None = None,
+                time_window: int | None = None, log=print) -> tuple[Graph, dict]:
+    """Ingest every source under ``input_dir`` and run extraction + all analyses.
+
+    ``config`` (see :mod:`tgo.config`) holds every tunable; the ``auto_accept`` and
+    ``time_window`` keywords are shortcuts that override the corresponding config fields.
+    Returns ``(graph, report)`` where ``report`` holds per-step counts and timings.
+    """
+    cfg = copy.deepcopy(config) if config is not None else Config()
+    if auto_accept is not None:
+        cfg.identity.auto_accept = auto_accept
+    if time_window is not None:
+        cfg.coordination.time_window = time_window
     input_dir = Path(input_dir)
     src = discover(input_dir)
     g = Graph()
@@ -56,18 +91,40 @@ def build_graph(input_dir: str | Path, *, auto_accept: float | None = None, time
         log(f"  [{timings[name]:6.2f}s] {name}: {r}")
         return r
 
-    if not src["mtproto"] and not src["export"]:
+    report["plugins"] = plugins.load(cfg.plugins.modules, cfg.plugins.entry_points)
+    extra = {name: s.discover(input_dir) for name, s in plugins.REGISTRY.sources.items()}
+    if not src["mtproto"] and not src["export"] and not any(extra.values()):
         raise SystemExit(f"no Telegram sources found under {input_dir} (collector.json / result.json)")
     for d in src["mtproto"]:
         step(f"ingest mtproto {d.name}", ingest_mtproto, g, d)
     for rj in src["export"]:
         step(f"ingest export {rj.parent.name}", ingest_desktop_export, g, rj)
-    report["extract"] = step("extract", extractors.run_all, g, Path("."))
-    report["aggregate"] = step("aggregate", aggregate.run, g)
-    report["coordination"] = step("coordination", coordination.run, g, time_window=time_window)
-    report["communities"] = step("communities", communities.run, g)
+    for name, paths in extra.items():
+        for path in paths:
+            step(f"ingest {name} {Path(path).name}", plugins.REGISTRY.sources[name].ingest, g, Path(path))
+
+    def builtin(name, fn, *a, **kw):
+        report[name] = step(name, fn, *a, **kw)
+        for s in plugins.steps_after(name, "memory"):
+            report[s.name] = step(s.name, s.fn, g, cfg)
+
+    builtin("extract", extractors.run_all, g, Path("."),
+            gazetteer=extractors.load_gazetteer(cfg.extract.gazetteer_path),
+            phash_threshold=cfg.extract.phash_threshold)
+    builtin("aggregate", aggregate.run, g)
+    builtin("coordination", coordination.run, g, **vars(cfg.coordination))
+    c = cfg.communities
+    builtin("communities", communities.run, g, seeds=c.seeds, resolution=c.resolution,
+            min_size=c.min_size, min_stability=c.min_stability, edge_weights=c.edge_weights,
+            deterministic=c.deterministic)
     decisions = json.loads(src["judgements"].read_text(encoding="utf-8")) if src["judgements"] else None
-    report["identity"] = step("identity", identity.run, g, decisions, auto_accept=auto_accept)
+    i = cfg.identity
+    builtin("identity", identity.run, g, decisions, min_score=i.min_score,
+            auto_accept=i.auto_accept, weights=i.weights,
+            strong_identifiers=i.strong_identifiers, min_bio_len=i.min_bio_len)
+    for s in plugins.orphan_steps("memory"):
+        report[s.name] = step(s.name, s.fn, g, cfg)
+    report["config"] = cfg.to_dict()
     report["timings"] = timings
     return g, report
 
@@ -109,12 +166,24 @@ def layout(g: Graph, seed: int = 7, max_full: int = 2500) -> dict[str, tuple[flo
     return out
 
 
-def run(input_dir: str | Path, out_dir: str | Path, *, auto_accept: float | None = None,
-        time_window: int = 60, html: bool = True, log=print) -> dict:
+def run(input_dir: str | Path, out_dir: str | Path, config: Config | None = None, *,
+        auto_accept: float | None = None, time_window: int | None = None, html: bool | None = None,
+        log=print) -> dict:
+    """Full pipeline: :func:`build_graph`, validation, every export and (optionally) report.html.
+
+    Writes to ``out_dir`` and returns the summary dict (also saved as ``summary.json``).
+    """
+    cfg = copy.deepcopy(config) if config is not None else Config()
+    if html is not None:
+        cfg.viewer.html = html
+    if choose_engine(input_dir, cfg) == "duckdb":
+        from .scale.pipeline import run as run_scale
+
+        return run_scale(input_dir, out_dir, cfg, auto_accept=auto_accept, time_window=time_window, log=log)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     log(f"TGO pipeline: {input_dir} -> {out}")
-    g, report = build_graph(input_dir, auto_accept=auto_accept, time_window=time_window, log=log)
+    g, report = build_graph(input_dir, cfg, auto_accept=auto_accept, time_window=time_window, log=log)
 
     findings = validate.validate(g)
     report["validation"] = validate.summary(findings)
@@ -130,15 +199,25 @@ def run(input_dir: str | Path, out_dir: str | Path, *, auto_accept: float | None
     }
     X.write_cypher(g, out / "neo4j.cypher")
     report["exports"]["neo4j.cypher"] = "MERGE script"
-    pos = layout(g)
+    pos = layout(g, seed=cfg.viewer.layout_seed, max_full=cfg.viewer.layout_max_full)
     X.write_gexf(g, out / "graph.gexf", positions=pos)
     report["exports"]["graph.gexf"] = "Gephi"
-    if html:
+    for name, ex in plugins.REGISTRY.exporters.items():
+        if "memory" in ex.engines:
+            report["exports"][name] = ex.fn(g, out, cfg)
+    if cfg.viewer.html:
         from .viz.report import build_report
 
-        build_report(g, findings, report, pos, out / "report.html")
+        build_report(g, findings, report, pos, out / "report.html", title=cfg.viewer.title,
+                     max_nodes=cfg.viewer.max_nodes)
         report["exports"]["report.html"] = "viewer"
     (out / "summary.json").write_text(json.dumps(report, indent=1, default=str), encoding="utf-8")
+    if cfg.viewer.dashboard:   # reads the files just written, so it runs last
+        from .dashboard import build_dashboard
+
+        build_dashboard(out, max_nodes=cfg.viewer.dashboard_max_nodes)
+        report["exports"]["dashboard.html"] = "dashboard"
+        (out / "summary.json").write_text(json.dumps(report, indent=1, default=str), encoding="utf-8")
     v = report["validation"]
     log(f"done: {len(g.nodes)} nodes, {len(g.edges)} edges; validation "
         f"{v['violation']} violations / {v['warning']} warnings / {v['info']} info")

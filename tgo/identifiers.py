@@ -15,6 +15,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 @dataclass(frozen=True)
 class Found:
+    """An identifier found in text: kind, TGO label, normalised value, span, validation and confidence."""
     kind: str        # key namespace: btc, eth, tron, iban, phone, url, domain, email, tg
     label: str       # TGO class: CryptoAddress, IBAN, PhoneNumber, Url, Domain, Email, TelegramHandle
     value: str       # normalized value
@@ -77,6 +78,7 @@ def keccak256(data: bytes) -> bytes:
 
 
 def eip55(addr_hex40: str) -> str:
+    """EIP-55 mixed-case checksum form of a 40-hex-digit Ethereum address."""
     lower = addr_hex40.lower()
     h = keccak256(lower.encode()).hex()
     return "0x" + "".join(ch.upper() if ch.isalpha() and int(h[i], 16) >= 8 else ch
@@ -88,6 +90,7 @@ _B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
 
 def b58decode(s: str) -> bytes:
+    """Base58 (Bitcoin alphabet) decode."""
     n = 0
     for ch in s:
         n = n * 58 + _B58.index(ch)
@@ -97,6 +100,7 @@ def b58decode(s: str) -> bytes:
 
 
 def b58encode(b: bytes) -> str:
+    """Base58 (Bitcoin alphabet) encode."""
     n = int.from_bytes(b, "big")
     out = ""
     while n:
@@ -111,6 +115,7 @@ def _dsha(b: bytes) -> bytes:
 
 
 def b58check_encode(payload: bytes) -> str:
+    """Base58Check-encode ``payload`` (appends the double-sha256 checksum)."""
     return b58encode(payload + _dsha(payload)[:4])
 
 
@@ -164,6 +169,7 @@ _IBAN_LEN = {
 
 
 def iban_valid(iban: str) -> bool:
+    """IBAN length (per country) + ISO 13616 mod-97 check."""
     s = iban.replace(" ", "").upper()
     exp = _IBAN_LEN.get(s[:2])
     if exp is not None and len(s) != exp:
@@ -193,6 +199,7 @@ _CC = {"1", "7", "20", "27", "30", "31", "32", "33", "34", "36", "39", "40", "41
 
 
 def canonical_url(url: str) -> str:
+    """Canonical URL: https, lower-case host without www, tracking params and trailing slash removed."""
     u = url.rstrip(".,;:!?")
     if not re.match(r"https?://", u, re.I):
         u = "https://" + u

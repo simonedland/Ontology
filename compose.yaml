@@ -1,0 +1,88 @@
+# tgstore: PostgreSQL + an HTTP ingest/read API + a drop folder.
+#
+#   docker compose up -d                       db + api (http://127.0.0.1:8080/docs) + inbox (./inbox)
+#   docker compose --profile collect run --rm collect --chat @somegroup --backfill 1000 --follow
+#
+# Every setting has a default; override any of them in .env (see .env.example).
+name: tgstore
+
+x-app: &app
+  build: .
+  image: tgstore:local
+  restart: unless-stopped
+  depends_on:
+    db: {condition: service_healthy}
+  environment: &app-env
+    TGSTORE_DATABASE_URL: postgresql://${POSTGRES_USER:-tgstore}:${POSTGRES_PASSWORD:-tgstore}@db:5432/${POSTGRES_DB:-tgstore}
+    TGSTORE_TOKEN: ${TGSTORE_TOKEN:-}
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tgstore}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tgstore}
+      POSTGRES_DB: ${POSTGRES_DB:-tgstore}
+    # Tuned for steady bulk ingest. synchronous_commit=off: a crash can lose the last ~0.5 s of
+    # acknowledged writes (never corrupts); re-sending is harmless because ingest is idempotent.
+    command: >
+      postgres
+      -c shared_buffers=${PG_SHARED_BUFFERS:-1GB}
+      -c effective_cache_size=${PG_EFFECTIVE_CACHE:-3GB}
+      -c work_mem=32MB
+      -c maintenance_work_mem=512MB
+      -c max_wal_size=8GB
+      -c checkpoint_timeout=15min
+      -c wal_compression=on
+      -c synchronous_commit=${PG_SYNCHRONOUS_COMMIT:-off}
+      -c max_connections=200
+      -c jit=off
+    shm_size: 1g
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "${TGSTORE_BIND:-127.0.0.1}:${PG_PORT:-5432}:5432"   # analysis tools can query SQL directly
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U ${POSTGRES_USER:-tgstore} -d ${POSTGRES_DB:-tgstore}"]
+      interval: 2s
+      retries: 30
+
+  api:
+    <<: *app
+    command: [serve, --host, 0.0.0.0, --port, "8080", --workers, "${TGSTORE_WORKERS:-4}"]
+    ports:
+      - "${TGSTORE_BIND:-127.0.0.1}:${TGSTORE_PORT:-8080}:8080"
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request as u; u.urlopen('http://127.0.0.1:8080/v1/health', timeout=3)"]
+      interval: 10s
+      start_period: 10s
+
+  # Drop *.ndjson / *.json / Telegram Desktop result.json files into ./inbox from the host.
+  inbox:
+    <<: *app
+    user: "0"   # a bind-mounted folder is owned by whoever created it on the host; root can always move files
+    command: [inbox, /inbox]
+    volumes:
+      - ${TGSTORE_INBOX_DIR:-./inbox}:/inbox
+
+  # Telegram collector (Telethon). Needs TG_API_ID / TG_API_HASH from https://my.telegram.org.
+  # The first run asks for a login code, so start it with `run` (interactive), not `up`.
+  collect:
+    <<: *app
+    profiles: [collect]
+    depends_on:
+      api: {condition: service_healthy}
+    entrypoint: [tgstore, collect]
+    command: [--help]
+    environment:
+      <<: *app-env
+      TGSTORE_URL: http://api:8080
+      TG_API_ID: ${TG_API_ID:-}
+      TG_API_HASH: ${TG_API_HASH:-}
+      TG_SESSION: /session/tgstore
+    volumes:
+      - ${TGSTORE_SESSION_DIR:-./session}:/session
+
+volumes:
+  pgdata: {}

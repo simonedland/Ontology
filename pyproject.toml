@@ -1,0 +1,41 @@
+[build-system]
+requires = ["uv_build>=0.13.1,<0.14"]
+build-backend = "uv_build"
+
+[project]
+name = "tgstore"
+version = "0.1.0"
+description = "Simple, scalable storage for Telegram chats, users, messages and memberships"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "psycopg[binary]>=3.2",
+    "psycopg-pool>=3.2",
+]
+
+[project.optional-dependencies]
+collect = ["telethon>=1.45,<2"]
+
+[project.scripts]
+tgstore = "tgstore.__main__:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.8"]
+
+[tool.uv.build-backend]
+module-name = "tgstore"
+module-root = ""
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = ["legacy"]
+
+[tool.ruff.lint]
+ignore = ["B008"]  # FastAPI declares dependencies and query params in argument defaults

@@ -235,3 +235,7 @@ workspace/*/*
 !workspace/*/.gitkeep
 !workspace/config/tgo.example.toml
 !workspace/README.md
+
+# tgstore
+inbox/
+session/

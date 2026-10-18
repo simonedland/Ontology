@@ -1,0 +1,70 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv run --only-group dev ruff check tgstore tests scripts
+
+  test:
+    name: test (${{ matrix.extras || 'core' }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        extras: ["", collect]
+    services:
+      postgres:
+        image: postgres:17
+        env: {POSTGRES_USER: tgstore, POSTGRES_PASSWORD: tgstore, POSTGRES_DB: tgstore}
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U tgstore" --health-interval 2s --health-retries 30
+    env:
+      TGSTORE_DATABASE_URL: postgresql://tgstore:tgstore@localhost:5432/tgstore
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+      - run: uv sync --group dev ${{ matrix.extras && format('--extra {0}', matrix.extras) }}
+      - run: uv run pytest
+
+  compose-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start db + api + inbox
+        run: |
+          mkdir -m 777 inbox   # bind-mounted; the container runs as uid 1000
+          docker compose up -d --build --wait
+      - name: POST a record and read it back
+        run: |
+          curl -fsS -X POST http://127.0.0.1:8080/v1/records -H 'Content-Type: application/x-ndjson' \
+            --data-binary '{"kind": "user", "id": 7000, "username": "smoke_api"}'
+          curl -fsS http://127.0.0.1:8080/v1/users/7000 | tee /dev/stderr | grep -q smoke_api
+      - name: Drop a file into the inbox and read it back
+        run: |
+          echo '{"kind": "user", "id": 7001, "username": "smoke_inbox"}' > inbox/smoke.ndjson
+          for i in $(seq 30); do
+            curl -fsS http://127.0.0.1:8080/v1/users/7001 2>/dev/null | grep -q smoke_inbox && exit 0
+            sleep 1
+          done
+          ls -R inbox; exit 1
+      - if: failure()
+        run: docker compose logs
+      - if: always()
+        run: docker compose down -v
